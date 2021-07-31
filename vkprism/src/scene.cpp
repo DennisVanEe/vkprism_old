@@ -15,100 +15,6 @@ namespace prism {
 
 constexpr uint64_t FENCE_TIMEOUT = 6e+10; // 1 minute (not sure how long this should be...)
 
-static Mesh loadMesh(const std::string& filePath, std::vector<Vertex>& globalVertices,
-                     std::vector<glm::u32vec3>& globalFaces)
-{
-    const std::string  cstrFilepath(filePath);
-    miniply::PLYReader plyReader(cstrFilepath.c_str());
-
-    if (!plyReader.valid()) {
-        throw std::runtime_error(std::format("Could not open or parse PLY file at: {}", filePath));
-    }
-
-    // The data we want to work with:
-    const uint32_t facesOffset    = globalFaces.size();
-    const uint32_t verticesOffset = globalVertices.size();
-
-    uint32_t                        numVertices, numFaces;
-    std::unique_ptr<glm::vec3[]>    pos, nrm, tan;
-    std::unique_ptr<glm::vec2[]>    uvs;
-    std::unique_ptr<glm::u32vec3[]> faces;
-    {
-        // Store the position information used by ply reader to load values:
-        std::array<uint32_t, 3> triIdx, vrtIdx;
-
-        const auto faceElement = plyReader.get_element(plyReader.find_element(miniply::kPLYFaceElement));
-        if (!faceElement) {
-            throw std::runtime_error(std::format("Could not find face elements for PLY file at: {}", filePath));
-        }
-        faceElement->convert_list_to_fixed_size(faceElement->find_property("vertex_indices"), 3, triIdx.data());
-
-        bool hasVertices = false, hasFaces = false;
-        for (; plyReader.has_element() && (!hasVertices || !hasFaces); plyReader.next_element()) {
-            // If it's a vertex element:
-            if (plyReader.element_is(miniply::kPLYVertexElement) && plyReader.load_element()) {
-                numVertices = plyReader.num_rows();
-
-                // Check for position data:
-                if (!plyReader.find_pos(vrtIdx.data())) {
-                    throw std::runtime_error(std::format("Missing position data in PLY file at: {}", filePath));
-                }
-                pos.reset(new glm::vec3[numVertices]);
-                plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, pos.get());
-
-                // Check for normals:
-                if (plyReader.find_normal(vrtIdx.data())) {
-                    nrm.reset(new glm::vec3[numVertices]);
-                    plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, nrm.get());
-                }
-                // Check for tangents:
-                if (plyReader.find_properties(vrtIdx.data(), 3, "tx", "ty", "tz")) {
-                    tan.reset(new glm::vec3[numVertices]);
-                    plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, tan.get());
-                }
-                // Check for texture coordinates:
-                if (plyReader.find_texcoord(vrtIdx.data())) {
-                    uvs.reset(new glm::vec2[numVertices]);
-                    plyReader.extract_properties(vrtIdx.data(), 2, miniply::PLYPropertyType::Float, uvs.get());
-                }
-
-                hasVertices = true;
-            } else if (plyReader.element_is(miniply::kPLYFaceElement) && plyReader.load_element()) {
-                numFaces = plyReader.num_rows();
-                faces.reset(new glm::u32vec3[numFaces]);
-                plyReader.extract_properties(triIdx.data(), 3, miniply::PLYPropertyType::Int, faces.get());
-
-                hasFaces = true;
-            }
-        }
-
-        if (!hasVertices || !hasFaces) {
-            throw std::runtime_error(std::format("Poorly formed PLY file at: {}", filePath));
-        }
-    }
-
-    std::copy(faces.get(), faces.get() + numFaces, std::back_inserter(globalFaces));
-
-    for (size_t i = 0; i < numVertices; ++i) {
-        globalVertices.emplace_back(Vertex{
-            .pos = pos[i],
-            .nrm = nrm ? nrm[i] : glm::vec3(0.f),
-            .tan = tan ? tan[i] : glm::vec3(0.f),
-            .uvs = uvs ? uvs[i] : glm::vec2(0.f),
-        });
-    }
-
-    return Mesh{
-        .nrm            = static_cast<bool>(nrm),
-        .tan            = static_cast<bool>(tan),
-        .uvs            = static_cast<bool>(uvs),
-        .verticesOffset = verticesOffset,
-        .numVertices    = numVertices,
-        .facesOffset    = facesOffset,
-        .numFaces       = numFaces,
-    };
-}
-
 void Scene::createBlas(const Context& context)
 {
     const auto gpuVerticesAddr = m_gpuVertices.deviceAddress(*context.device);
@@ -193,12 +99,12 @@ void Scene::createBlas(const Context& context)
             vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, maxPrimitiveCounts);
 
         // Allocate space for the acceleration structure:
-        const auto accelStructureBuff = context.allocateBuffer(
+        auto accelStructureBuff = context.allocateBuffer(
             buildSizeInfo.accelerationStructureSize,
             vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
             VMA_MEMORY_USAGE_GPU_ONLY);
 
-        const auto accelStructure =
+        auto accelStructure =
             context.device->createAccelerationStructureKHRUnique(vk::AccelerationStructureCreateInfoKHR{
                 //.createFlags, TODO: figure out if this is required or not... (I don't think it is).
                 .buffer = *accelStructureBuff,
@@ -206,7 +112,7 @@ void Scene::createBlas(const Context& context)
                 .type   = vk::AccelerationStructureTypeKHR::eBottomLevel,
             });
 
-        m_blasBuffers.emplace_back(accelStructure, accelStructureBuff);
+        m_blasBuffers.emplace_back(std::move(accelStructure), std::move(accelStructureBuff));
         maxScratchSize = std::max(maxScratchSize, buildSizeInfo.buildScratchSize);
     }
 
@@ -399,6 +305,117 @@ void Scene::transferToGpu(const Context& context)
 {
     transferMeshData(context);
     createBlas(context);
+}
+
+Scene::IdType Scene::loadMesh(const std::string_view filePath)
+{
+    const std::string  cstrFilepath(filePath);
+    miniply::PLYReader plyReader(cstrFilepath.c_str());
+
+    if (!plyReader.valid()) {
+        throw std::runtime_error(std::format("Could not open or parse PLY file at: {}", filePath));
+    }
+
+    // The data we want to work with:
+    const uint32_t facesOffset    = m_faces.size();
+    const uint32_t verticesOffset = m_vertices.size();
+
+    uint32_t                        numVertices, numFaces;
+    std::unique_ptr<glm::vec3[]>    pos, nrm, tan;
+    std::unique_ptr<glm::vec2[]>    uvs;
+    std::unique_ptr<glm::u32vec3[]> faces;
+    {
+        // Store the position information used by ply reader to load values:
+        std::array<uint32_t, 3> triIdx, vrtIdx;
+
+        const auto faceElement = plyReader.get_element(plyReader.find_element(miniply::kPLYFaceElement));
+        if (!faceElement) {
+            throw std::runtime_error(std::format("Could not find face elements for PLY file at: {}", filePath));
+        }
+        faceElement->convert_list_to_fixed_size(faceElement->find_property("vertex_indices"), 3, triIdx.data());
+
+        bool hasVertices = false, hasFaces = false;
+        for (; plyReader.has_element() && (!hasVertices || !hasFaces); plyReader.next_element()) {
+            // If it's a vertex element:
+            if (plyReader.element_is(miniply::kPLYVertexElement) && plyReader.load_element()) {
+                numVertices = plyReader.num_rows();
+
+                // Check for position data:
+                if (!plyReader.find_pos(vrtIdx.data())) {
+                    throw std::runtime_error(std::format("Missing position data in PLY file at: {}", filePath));
+                }
+                pos.reset(new glm::vec3[numVertices]);
+                plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, pos.get());
+
+                // Check for normals:
+                if (plyReader.find_normal(vrtIdx.data())) {
+                    nrm.reset(new glm::vec3[numVertices]);
+                    plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, nrm.get());
+                }
+                // Check for tangents:
+                if (plyReader.find_properties(vrtIdx.data(), 3, "tx", "ty", "tz")) {
+                    tan.reset(new glm::vec3[numVertices]);
+                    plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, tan.get());
+                }
+                // Check for texture coordinates:
+                if (plyReader.find_texcoord(vrtIdx.data())) {
+                    uvs.reset(new glm::vec2[numVertices]);
+                    plyReader.extract_properties(vrtIdx.data(), 2, miniply::PLYPropertyType::Float, uvs.get());
+                }
+
+                hasVertices = true;
+            } else if (plyReader.element_is(miniply::kPLYFaceElement) && plyReader.load_element()) {
+                numFaces = plyReader.num_rows();
+                faces.reset(new glm::u32vec3[numFaces]);
+                plyReader.extract_properties(triIdx.data(), 3, miniply::PLYPropertyType::Int, faces.get());
+
+                hasFaces = true;
+            }
+        }
+
+        if (!hasVertices || !hasFaces) {
+            throw std::runtime_error(std::format("Poorly formed PLY file at: {}", filePath));
+        }
+    }
+
+    std::copy(faces.get(), faces.get() + numFaces, std::back_inserter(m_faces));
+
+    for (size_t i = 0; i < numVertices; ++i) {
+        m_vertices.emplace_back(Scene::Vertex{
+            .pos = pos[i],
+            .nrm = nrm ? nrm[i] : glm::vec3(0.f),
+            .tan = tan ? tan[i] : glm::vec3(0.f),
+            .uvs = uvs ? uvs[i] : glm::vec2(0.f),
+        });
+    }
+
+    const IdType meshId = m_meshes.size();
+    m_meshes.emplace_back(Mesh{
+        .nrm            = static_cast<bool>(nrm),
+        .tan            = static_cast<bool>(tan),
+        .uvs            = static_cast<bool>(uvs),
+        .verticesOffset = verticesOffset,
+        .numVertices    = numVertices,
+        .facesOffset    = facesOffset,
+        .numFaces       = numFaces,
+    });
+
+    return meshId;
+}
+
+Scene::IdType Scene::loadTransform(const Transform& transform)
+{
+    const IdType id = m_transforms.size();
+    m_transforms.emplace_back(static_cast<vk::TransformMatrixKHR>(transform));
+    return id;
+}
+
+Scene::IdType Scene::loadMeshGroup(const std::span<MeshGroup::MeshInfo> meshInfos)
+{
+    const IdType id = m_meshGroups.size();
+    m_meshGroups.emplace_back(
+        MeshGroup{.meshes = std::vector<MeshGroup::MeshInfo>(meshInfos.begin(), meshInfos.end())});
+    return id;
 }
 
 } // namespace prism

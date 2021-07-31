@@ -10,9 +10,9 @@ add_executable(vkprism
         "src/util.cpp"
         "src/scene.hpp"
         "src/scene.cpp"
-		"src/math.hpp"
-		"src/math.cpp"
         "src/scene.hpp"
+        "src/transform.hpp"
+        "src/transform.cpp"
         # Any external libraries:
         "extern/vma/vk_mem_alloc.cpp"
 		"extern/miniply/miniply.cpp")

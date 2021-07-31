@@ -2,12 +2,13 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include <context.hpp>
+#include <transform.hpp>
 
 #include <glm/gtx/quaternion.hpp>
 #include <glm/mat3x4.hpp>
@@ -15,48 +16,56 @@
 
 namespace prism {
 
-// The scene basically manages everything that will be sent to the GPU (mesh data, texture data, light data, camera
-// data, etc.)
-
-using IdType = uint32_t; // Type used to specify the ID between mesh, nodes, etc.
-
-struct Vertex
-{
-    glm::vec3 pos;
-    glm::vec3 nrm;
-    glm::vec3 tan;
-    glm::vec2 uvs;
-};
-
-struct Mesh
-{
-    bool nrm, tan, uvs; // whether or not these are present
-
-    uint32_t verticesOffset;
-    uint32_t numVertices;
-
-    uint32_t facesOffset;
-    uint32_t numFaces;
-};
-
-// A MeshGroup is a group of mesh that can be instanced. This is equivelant to a BLAS in Vulkan RT terminology.
-struct MeshGroup
-{
-    struct MeshInfo
-    {
-        IdType                meshId;
-        std::optional<IdType> transformId;
-    };
-
-    std::vector<MeshInfo> meshes;
-};
-
 class Scene
 {
   public:
+    using IdType = uint32_t; // Type used to specify the ID between mesh, nodes, etc.
+
+    struct Vertex
+    {
+        glm::vec3 pos;
+        glm::vec3 nrm;
+        glm::vec3 tan;
+        glm::vec2 uvs;
+    };
+
+    struct Mesh
+    {
+        bool nrm, tan, uvs; // whether or not these are present
+
+        uint32_t verticesOffset;
+        uint32_t numVertices;
+
+        uint32_t facesOffset;
+        uint32_t numFaces;
+    };
+
+    // A MeshGroup is a group of mesh that can be instanced. This is equivelant to a BLAS in Vulkan RT terminology.
+    struct MeshGroup
+    {
+        // MeshInfo is just a pair of mesh mesh Ids and corresponding transformIds (note that if it's none, then it's
+        // the identity transform).
+        struct MeshInfo
+        {
+            IdType                meshId;
+            std::optional<IdType> transformId;
+        };
+
+        std::vector<MeshInfo> meshes;
+    };
+
     // Transfer all scene data to the GPU. After this call has finished, all of the data should be on
     // the GPU (it's not async).
     void transferToGpu(const Context& context);
+
+    // Adds a mesh to the Scene, returning the Id of the mesh.
+    IdType loadMesh(std::string_view path);
+
+    // Adds a transform to the Scene, returning the Id of the transform.
+    IdType loadTransform(const Transform& transform);
+
+    // Creates a mesh group by passing a collection of mesh infos.
+    IdType loadMeshGroup(std::span<MeshGroup::MeshInfo> meshInfos);
 
   private:
     void createBlas(const Context& context);
