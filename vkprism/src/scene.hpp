@@ -65,7 +65,7 @@ class Scene
     IdType loadTransform(const Transform& transform);
 
     // Creates a mesh group by passing a collection of mesh infos.
-    IdType loadMeshGroup(std::span<MeshGroup::MeshInfo> meshInfos);
+    IdType loadMeshGroup(std::span<const MeshGroup::MeshInfo> meshInfos);
 
   private:
     void createBlas(const Context& context);

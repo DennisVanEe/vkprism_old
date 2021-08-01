@@ -28,8 +28,7 @@ struct ContextParam
 
 #define DEVICE_FEATURES_STRUCTURE                                                                                      \
     vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan12Features,               \
-        vk::PhysicalDeviceAccelerationStructureFeaturesKHR, vk::PhysicalDeviceRayTracingPipelineFeaturesKHR,           \
-        vk::PhysicalDeviceBufferDeviceAddressFeaturesEXT
+        vk::PhysicalDeviceAccelerationStructureFeaturesKHR, vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
 
 #define DEVICE_PROPERTIES_STRUCTURE                                                                                    \
     vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties, vk::PhysicalDeviceVulkan12Properties
@@ -80,7 +79,13 @@ class UniqueBuffer
     UniqueBuffer()                    = default;
     UniqueBuffer(const UniqueBuffer&) = delete;
     UniqueBuffer(UniqueBuffer&&)      = default;
-    ~UniqueBuffer() { vmaDestroyBuffer(m_allocator, m_buffer, m_allocation); }
+    ~UniqueBuffer()
+    {
+        // vma still has an assert that goes off if it's null (even though it checks for it...)
+        if (m_buffer) {
+            vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
+        }
+    }
 
     UniqueBuffer& operator=(UniqueBuffer&&) = default;
     vk::Buffer    operator*() const { return get(); }

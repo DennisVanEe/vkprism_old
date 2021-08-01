@@ -410,7 +410,7 @@ Scene::IdType Scene::loadTransform(const Transform& transform)
     return id;
 }
 
-Scene::IdType Scene::loadMeshGroup(const std::span<MeshGroup::MeshInfo> meshInfos)
+Scene::IdType Scene::loadMeshGroup(const std::span<const MeshGroup::MeshInfo> meshInfos)
 {
     const IdType id = m_meshGroups.size();
     m_meshGroups.emplace_back(

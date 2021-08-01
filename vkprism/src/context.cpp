@@ -21,10 +21,7 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 namespace prism {
 
-static void glfwCallback(const int error, const char const* desc)
-{
-    spdlog::error("GLFW Error {}: {}", desc, error);
-}
+static void glfwCallback(const int error, const char const* desc) { spdlog::error("GLFW Error {}: {}", desc, error); }
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsCallback(const VkDebugUtilsMessageSeverityFlagBitsEXT      msgSeverity,
                                                          const VkDebugUtilsMessageTypeFlagsEXT             msgType,
@@ -73,9 +70,9 @@ constexpr vk::DebugUtilsMessengerCreateInfoEXT DEBUG_UTILS_MSGR_CREATE_INFO{
 static std::vector<const char*> getRequiredDeviceExtensions(const ContextParam& param)
 {
     // All of the device extensions needed for ray-tracing acceleration:
-    return {};
+    // return {};
     return {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME};
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME};
 }
 
 static std::vector<const char*> getRequiredInstanceExtensions(const ContextParam& param)
@@ -193,11 +190,12 @@ static vk::UniqueDevice createDevice(const vk::Instance& instance, const Physica
     }
 
     const vk::DeviceCreateInfo devCreateInfo{
+        .pNext                   = &physDevInfo.features.get<vk::PhysicalDeviceFeatures2>(),
         .queueCreateInfoCount    = static_cast<uint32_t>(devQueueCreateInfos.size()),
         .pQueueCreateInfos       = devQueueCreateInfos.data(),
         .enabledExtensionCount   = static_cast<uint32_t>(reqDeviceExts.size()),
         .ppEnabledExtensionNames = reqDeviceExts.data(),
-        .pEnabledFeatures        = &physDevInfo.features.get<vk::PhysicalDeviceFeatures2>().features,
+        //.pEnabledFeatures        = &physDevInfo.features.get<vk::PhysicalDeviceFeatures2>().features,
     };
 
     auto device = physDevInfo.physicalDevice.createDeviceUnique(devCreateInfo);
@@ -318,6 +316,7 @@ static UniqueVmaAllocator createVmaAllocator(const vk::Instance& instance, const
     };
 
     const VmaAllocatorCreateInfo createInfo{
+        .flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
         .physicalDevice   = physDevInfo.physicalDevice,
         .device           = device,
         .pVulkanFunctions = &vkFunctions,
@@ -347,6 +346,11 @@ PhysicalDeviceInfo::PhysicalDeviceInfo(const vk::PhysicalDevice physicalDevice, 
         }
     } else {
         robustBufferAccess = VK_FALSE;
+    }
+
+    auto& bufferDeviceAddress = features.get<vk::PhysicalDeviceVulkan12Features>().bufferDeviceAddress;
+    if (bufferDeviceAddress != VK_TRUE) {
+        throw std::runtime_error("bufferDeviceAddress isn't supported by the chosen physcial device.");
     }
 }
 
