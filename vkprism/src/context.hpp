@@ -76,20 +76,42 @@ using UniqueVmaAllocator = CustomUniquePtr<std::remove_pointer_t<VmaAllocator>, 
 class UniqueBuffer
 {
   public:
-    UniqueBuffer()                    = default;
+    UniqueBuffer() = default;
+
+    UniqueBuffer(UniqueBuffer&& other) :
+        m_buffer(other.m_buffer), m_allocation(other.m_allocation), m_allocator(other.m_allocator)
+    {
+        // After moving, the object should be in a valid state (due to destructors...).
+        // In most cases, the compiler should be able to optimize this out (when returning a UniqueBuffer from a
+        // function).
+        other.m_buffer = VK_NULL_HANDLE;
+    }
+
+    UniqueBuffer& operator=(UniqueBuffer&& other)
+    {
+        if (this == &other) {
+            return *this;
+        }
+
+        m_buffer       = other.m_buffer;
+        m_allocation   = other.m_allocation;
+        m_allocator    = other.m_allocator;
+        other.m_buffer = VK_NULL_HANDLE;
+        return *this;
+    }
+
     UniqueBuffer(const UniqueBuffer&) = delete;
-    UniqueBuffer(UniqueBuffer&&)      = default;
+    UniqueBuffer& operator=(const UniqueBuffer&) = delete;
+
     ~UniqueBuffer()
     {
-        // vma still has an assert that goes off if it's null (even though it checks for it...)
         if (m_buffer) {
             vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
         }
     }
 
-    UniqueBuffer& operator=(UniqueBuffer&&) = default;
-    vk::Buffer    operator*() const { return get(); }
-                  operator bool() const { return m_buffer; }
+    vk::Buffer operator*() const { return get(); }
+               operator bool() const { return m_buffer; }
 
     vk::Buffer        get() const { return m_buffer; }
     vk::DeviceAddress deviceAddress(const vk::Device& device) const

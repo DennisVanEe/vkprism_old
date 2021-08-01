@@ -17,7 +17,7 @@ int main(const int argc, const char** const argv)
     try {
         Context ctx(param);
 
-        const char* path = "C:\\Users\\jan\\Downloads\\mesh_00028.ply";
+        const char* path = "D:\\Dev\\pbrt-v4-scenes\\barcelona-pavilion\\geometry\\mesh_00014.ply";
 
         Scene scene;
         const auto meshId = scene.loadMesh(path);

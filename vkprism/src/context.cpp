@@ -70,7 +70,7 @@ constexpr vk::DebugUtilsMessengerCreateInfoEXT DEBUG_UTILS_MSGR_CREATE_INFO{
 static std::vector<const char*> getRequiredDeviceExtensions(const ContextParam& param)
 {
     // All of the device extensions needed for ray-tracing acceleration:
-    // return {};
+    return {};
     return {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME};
 }

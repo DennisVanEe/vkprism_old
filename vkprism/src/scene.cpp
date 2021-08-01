@@ -99,10 +99,10 @@ void Scene::createBlas(const Context& context)
             vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, maxPrimitiveCounts);
 
         // Allocate space for the acceleration structure:
-        auto accelStructureBuff = context.allocateBuffer(
-            buildSizeInfo.accelerationStructureSize,
-            vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
-            VMA_MEMORY_USAGE_GPU_ONLY);
+        auto accelStructureBuff = context.allocateBuffer(buildSizeInfo.accelerationStructureSize,
+                                                         vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+                                                             vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                                         VMA_MEMORY_USAGE_GPU_ONLY);
 
         auto accelStructure =
             context.device->createAccelerationStructureKHRUnique(vk::AccelerationStructureCreateInfoKHR{
@@ -246,8 +246,7 @@ void Scene::transferMeshData(const Context& context)
 
     //
     // Allocate buffers on the GPU where we'll send the data:
-    const auto blasUsage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst |
-                           vk::BufferUsageFlagBits::eShaderDeviceAddress |
+    const auto blasUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress |
                            vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
     m_gpuVertices = context.allocateBuffer(sizeOfVerticesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
     m_gpuFaces    = context.allocateBuffer(sizeOfFacesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -304,7 +303,7 @@ void Scene::transferMeshData(const Context& context)
 void Scene::transferToGpu(const Context& context)
 {
     transferMeshData(context);
-    createBlas(context);
+    // createBlas(context);
 }
 
 Scene::IdType Scene::loadMesh(const std::string_view filePath)
