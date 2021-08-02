@@ -87,7 +87,7 @@ void Scene::createBlas(const Context& context)
     size_t maxScratchSize = 0;
     for (uint32_t i = 0; i < m_meshGroups.size(); ++i) {
         const auto& meshGroup         = m_meshGroups[i];
-        const auto& buildGeometryInfo = buildGeometryInfos[i];
+        auto&       buildGeometryInfo = buildGeometryInfos[i];
 
         std::vector<uint32_t> maxPrimitiveCounts;
         maxPrimitiveCounts.reserve(meshGroup.meshes.size());
@@ -111,6 +111,9 @@ void Scene::createBlas(const Context& context)
                 .size   = buildSizeInfo.accelerationStructureSize,
                 .type   = vk::AccelerationStructureTypeKHR::eBottomLevel,
             });
+
+        // Now that we have created it, we can set the destination location:
+        buildGeometryInfo.dstAccelerationStructure = *accelStructure;
 
         m_blasBuffers.emplace_back(std::move(accelStructure), std::move(accelStructureBuff));
         maxScratchSize = std::max(maxScratchSize, buildSizeInfo.buildScratchSize);
@@ -303,7 +306,7 @@ void Scene::transferMeshData(const Context& context)
 void Scene::transferToGpu(const Context& context)
 {
     transferMeshData(context);
-    // createBlas(context);
+    createBlas(context);
 }
 
 Scene::IdType Scene::loadMesh(const std::string_view filePath)
