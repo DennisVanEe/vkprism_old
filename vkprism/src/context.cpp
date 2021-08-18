@@ -70,7 +70,7 @@ constexpr vk::DebugUtilsMessengerCreateInfoEXT DEBUG_UTILS_MSGR_CREATE_INFO{
 static std::vector<const char*> getRequiredDeviceExtensions(const ContextParam& param)
 {
     // All of the device extensions needed for ray-tracing acceleration:
-    return {};
+    // return {};
     return {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME};
 }
@@ -217,11 +217,11 @@ static Queues createQueues(const vk::Device& device, const PhysicalDeviceInfo& p
     };
     std::vector<QueueScore> queueScores;
     queueScores.reserve(physDevInfo.queueFamilyProps.size());
-    for (const auto& prop : physDevInfo.queueFamilyProps) {
-        const int score = static_cast<bool>(prop.queueFlags & vk::QueueFlagBits::eGraphics) +
-                          static_cast<bool>(prop.queueFlags & vk::QueueFlagBits::eCompute) +
-                          static_cast<bool>(prop.queueFlags & vk::QueueFlagBits::eTransfer);
-        const uint32_t familyIndex = &prop - &physDevInfo.queueFamilyProps[0];
+    for (uint32_t familyIndex = 0; familyIndex < physDevInfo.queueFamilyProps.size(); ++familyIndex) {
+        const auto& prop  = physDevInfo.queueFamilyProps[familyIndex];
+        const int   score = ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) +
+                          ((prop.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) +
+                          ((prop.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer);
         queueScores.emplace_back(score, prop.queueFlags, familyIndex, 0, prop.queueCount);
     }
 
@@ -239,7 +239,7 @@ static Queues createQueues(const vk::Device& device, const PhysicalDeviceInfo& p
 
     const auto createQueueFn = [&](const vk::QueueFlags flags) -> std::optional<QueueInfo> {
         auto itr = std::ranges::find_if(queueScores, [&](const auto& score) {
-            return (score.flags & flags) && (score.queueIndex < score.queueCount);
+            return ((score.flags & flags) == flags) && (score.queueIndex < score.queueCount);
         });
         if (itr == queueScores.end()) {
             return std::nullopt;
