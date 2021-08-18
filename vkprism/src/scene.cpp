@@ -15,6 +15,17 @@ namespace prism {
 
 constexpr uint64_t FENCE_TIMEOUT = 6e+10; // 1 minute (not sure how long this should be...)
 
+void Scene::createTlas(const Context& context)
+{
+    std::vector<vk::AccelerationStructureInstanceKHR> instances;
+
+    for (const auto& instance : m_instances) {
+        instances.emplace_back(vk::AccelerationStructureInstanceKHR{
+            .transform = static_cast<vk::TransformMatrixKHR>(instance.transform),
+        });
+    }
+}
+
 void Scene::createBlas(const Context& context)
 {
     const auto gpuVerticesAddr = m_gpuVertices.deviceAddress(*context.device);
@@ -306,7 +317,7 @@ void Scene::transferToGpu(const Context& context)
     // createBlas(context);
 }
 
-Scene::IdType Scene::loadMesh(const std::string_view filePath)
+Scene::IdType Scene::createMesh(const std::string_view filePath)
 {
     const std::string  cstrFilepath(filePath);
     miniply::PLYReader plyReader(cstrFilepath.c_str());
@@ -402,18 +413,36 @@ Scene::IdType Scene::loadMesh(const std::string_view filePath)
     return meshId;
 }
 
-Scene::IdType Scene::loadTransform(const Transform& transform)
+Scene::IdType Scene::createTransform(const Transform& transform)
 {
     const IdType id = m_transforms.size();
     m_transforms.emplace_back(static_cast<vk::TransformMatrixKHR>(transform));
     return id;
 }
 
-Scene::IdType Scene::loadMeshGroup(const std::span<const MeshGroup::MeshInfo> meshInfos)
+Scene::IdType Scene::createMeshGroup(const std::span<const MeshGroup::MeshInfo> meshInfos)
 {
+    // Perform some validation first:
+    if (!std::ranges::all_of(meshInfos, [&](const auto& meshInfo) {
+            return validMeshId(meshInfo.meshId) && validTransformId(meshInfo.transformId);
+        })) {
+        throw std::runtime_error("When creating mesh group invalid transform/mesh id was used.");
+    }
+
     const IdType id = m_meshGroups.size();
     m_meshGroups.emplace_back(
         MeshGroup{.meshes = std::vector<MeshGroup::MeshInfo>(meshInfos.begin(), meshInfos.end())});
+    return id;
+}
+
+Scene::IdType Scene::createInstance(const Instance& instance)
+{
+    if (!validMeshGroupId(instance.meshGroupId) || !validTransformId(instance.transformId)) {
+        throw std::runtime_error("When creating instance invalid transform/mesh group id was used.");
+    }
+
+    const IdType id = m_instances.size();
+    m_instances.emplace_back(instance);
     return id;
 }
 

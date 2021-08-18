@@ -7,7 +7,7 @@ namespace prism {
 
 Transform::operator vk::TransformMatrixKHR() const
 {
-    // GLM stores their matrices column wise while (for some reason), Vulkan's transform matrix is row-wise. So, we
+    // GLM stores their matrices column wise while (for some reason) Vulkan's transform matrix is row-wise. So, we
     // first perform a transpose.
     const auto transpose = glm::transpose(m_matrix);
     return vk::TransformMatrixKHR{

@@ -43,7 +43,7 @@ class Scene
     // A MeshGroup is a group of mesh that can be instanced. This is equivelant to a BLAS in Vulkan RT terminology.
     struct MeshGroup
     {
-        // MeshInfo is just a pair of mesh mesh Ids and corresponding transformIds (note that if it's none, then it's
+        // MeshInfo is just a pair of mesh Ids and corresponding transformIds (note that if it's none, then it's
         // the identity transform).
         struct MeshInfo
         {
@@ -54,31 +54,61 @@ class Scene
         std::vector<MeshInfo> meshes;
     };
 
+    // An instance is a poiner to a MeshGroup (that will be instanced) and a corresponding transform id (if not set,
+    // then it will be the identity transform). Multi-level instancing will be added later...
+    // Each instance is also equiped with a custom instance id. So the shader doesn't have to change. Note that this
+    // should be unique.
+    struct Instance
+    {
+        uint32_t  customId;
+        uint32_t  hitGroupId;
+        IdType    meshGroupId;
+        Transform transform;
+    };
+
     // Transfer all scene data to the GPU. After this call has finished, all of the data should be on
     // the GPU (it's not async).
     void transferToGpu(const Context& context);
 
     // Adds a mesh to the Scene, returning the Id of the mesh.
-    IdType loadMesh(std::string_view path);
+    IdType createMesh(std::string_view path);
 
     // Adds a transform to the Scene, returning the Id of the transform.
-    IdType loadTransform(const Transform& transform);
+    IdType createTransform(const Transform& transform);
 
     // Creates a mesh group by passing a collection of mesh infos.
-    IdType loadMeshGroup(std::span<const MeshGroup::MeshInfo> meshInfos);
+    IdType createMeshGroup(std::span<const MeshGroup::MeshInfo> meshInfos);
+
+    // Creates an instance by passing a collection of mesh infos.
+    IdType createInstance(const Instance& instance);
 
   private:
+    void createTlas(const Context& context);
     void createBlas(const Context& context);
     void transferMeshData(const Context& context);
 
+    bool validTransformId(IdType id) const { return id < m_transforms.size(); }
+    // Transform Ids are often optional, so we add that case here:
+    bool validTransformId(std::optional<IdType> id) const
+    {
+        if (id) {
+            return validTransformId(*id);
+        }
+        return true;
+    }
+
+    bool validMeshGroupId(IdType id) const { return id < m_meshGroups.size(); }
+    bool validMeshId(IdType id) const { return id < m_meshes.size(); }
+
     // Raw mesh data:
-    std::vector<Mesh>         m_meshes;
-    std::vector<Vertex>       m_vertices;
-    std::vector<glm::u32vec3> m_faces;
+    std::vector<Mesh>                   m_meshes;
+    std::vector<Vertex>                 m_vertices;
+    std::vector<glm::u32vec3>           m_faces;
+    std::vector<vk::TransformMatrixKHR> m_transforms;
 
     // Collection of mesh groups:
-    std::vector<vk::TransformMatrixKHR> m_transforms;
-    std::vector<MeshGroup>              m_meshGroups;
+    std::vector<MeshGroup> m_meshGroups;
+    std::vector<Instance>  m_instances;
 
     UniqueBuffer m_gpuVertices;
     UniqueBuffer m_gpuFaces;
