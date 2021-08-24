@@ -61,6 +61,7 @@ class Scene
     struct Instance
     {
         uint32_t  customId;
+        uint32_t  mask;
         uint32_t  hitGroupId;
         IdType    meshGroupId;
         Transform transform;
@@ -83,9 +84,9 @@ class Scene
     IdType createInstance(const Instance& instance);
 
   private:
-    void createTlas(const Context& context);
-    void createBlas(const Context& context);
-    void transferMeshData(const Context& context);
+    void createTlas(const Context& context, const vk::CommandPool& commandPool);
+    void createBlas(const Context& context, const vk::CommandPool& commandPool);
+    void transferMeshData(const Context& context, const vk::CommandPool& commandPool);
 
     bool validTransformId(IdType id) const { return id < m_transforms.size(); }
     // Transform Ids are often optional, so we add that case here:
@@ -114,14 +115,15 @@ class Scene
     UniqueBuffer m_gpuFaces;
     UniqueBuffer m_gpuTransforms;
 
-    struct BlasInfo
+    struct AccelStructInfo
     {
         // NOTE: destruct accel structure before buffer is probably safer...
-        vk::UniqueAccelerationStructureKHR accelStructure;
         UniqueBuffer                       buffer;
+        vk::UniqueAccelerationStructureKHR accelStruct;
     };
 
-    std::vector<BlasInfo> m_blasBuffers;
+    std::vector<AccelStructInfo> m_blas;
+    AccelStructInfo              m_tlas;
 };
 
 } // namespace prism

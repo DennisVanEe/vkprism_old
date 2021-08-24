@@ -52,20 +52,6 @@ struct QueueInfo
     uint32_t  queueIndex;
 };
 
-struct Queues
-{
-    QueueInfo                general;
-    std::optional<QueueInfo> compute;
-    std::optional<QueueInfo> transfer;
-};
-
-struct CommandPools
-{
-    vk::UniqueCommandPool general;
-    vk::UniqueCommandPool compute;
-    vk::UniqueCommandPool transfer;
-};
-
 using UniqueGLFWWindow   = CustomUniquePtr<GLFWwindow, glfwDestroyWindow>;
 using UniqueVmaAllocator = CustomUniquePtr<std::remove_pointer_t<VmaAllocator>, vmaDestroyAllocator>;
 
@@ -167,10 +153,8 @@ struct Context
     PhysicalDeviceInfo physDevInfo;
     vk::UniqueDevice   device;
 
-    Queues       queues;
-    CommandPools commandPools;
-
-    QueueInfo transferQueue; // specializes in transfers, should be faster than normal queue (at least with NVidia)
+    vk::Queue queue;
+    uint32_t  queueFamilyIdx;
 
     UniqueVmaAllocator vmaAllocator;
 };

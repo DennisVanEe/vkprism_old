@@ -1,26 +1,28 @@
 ﻿project(prism VERSION 1.0.0 LANGUAGES CXX)
 
+add_compile_options("/std:c++20")
+
 # Add source to this project's executable.
 add_executable(vkprism
-        "src/main.cpp"
-        "src/main.hpp"
-        "src/context.hpp"
-        "src/context.cpp"
-        "src/util.hpp" 
-        "src/util.cpp"
-        "src/scene.hpp"
-        "src/scene.cpp"
-        "src/scene.hpp"
-        "src/transform.hpp"
-        "src/transform.cpp"
-        # Any external libraries:
-        "extern/vma/vk_mem_alloc.cpp"
-		"extern/miniply/miniply.cpp")
+    "src/main.cpp"
+    "src/main.hpp"
+    "src/context.hpp"
+    "src/context.cpp"
+    "src/util.hpp" 
+    "src/util.cpp"
+    "src/scene.hpp"
+    "src/scene.cpp"
+    "src/scene.hpp"
+    "src/transform.hpp"
+    "src/transform.cpp"
+    # Any external libraries:
+    "extern/vma/vk_mem_alloc.cpp"
+    "extern/miniply/miniply.cpp")
 
-set_target_properties(vkprism
-        PROPERTIES
-        CXX_STANDARD 20
-        CXX_STANDARD_REQUIRED YES)
+# set_target_properties(vkprism
+#     PROPERTIES
+#     CXX_STANDARD 20
+#     CXX_STANDARD_REQUIRED YES)
 
 target_include_directories(vkprism PUBLIC "${PROJECT_BINARY_DIR}/include/") # To allow us to include the configure.hpp file
 target_include_directories(vkprism PUBLIC "src/")

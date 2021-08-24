@@ -203,79 +203,25 @@ static vk::UniqueDevice createDevice(const vk::Instance& instance, const Physica
     return device;
 }
 
-static Queues createQueues(const vk::Device& device, const PhysicalDeviceInfo& physDevInfo)
+static QueueInfo createQueue(const vk::Device& device, const PhysicalDeviceInfo& physDevInfo)
 {
-    // Essentially, we want to sort queues by specialization, with the most specialized queues being the ones with the
-    // lowest number of flags set. We store this information inside a queue score:
-    struct QueueScore
-    {
-        int            score;
-        vk::QueueFlags flags;
-        uint32_t       familyIndex;
-        uint32_t       queueIndex;
-        uint32_t       queueCount;
-    };
-    std::vector<QueueScore> queueScores;
-    queueScores.reserve(physDevInfo.queueFamilyProps.size());
-    for (uint32_t familyIndex = 0; familyIndex < physDevInfo.queueFamilyProps.size(); ++familyIndex) {
-        const auto& prop  = physDevInfo.queueFamilyProps[familyIndex];
-        const int   score = ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) +
-                          ((prop.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) +
-                          ((prop.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer);
-        queueScores.emplace_back(score, prop.queueFlags, familyIndex, 0, prop.queueCount);
-    }
-
-    // Sort the scores so that the most specialized ones stay at the front:
-    std::ranges::sort(queueScores, [](const auto& scoreA, const auto& scoreB) {
-        if (scoreA.score < scoreB.score) {
-            return true;
-        } else if (scoreA.score > scoreB.score) {
-            return false;
-        }
-
-        // this way, we have a higher count of specialized queue families at the front
-        return scoreA.queueCount > scoreB.queueCount;
+    const auto itr = std::ranges::find_if(physDevInfo.queueFamilyProps, [&](const auto& prop) {
+        return ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) &&
+               ((prop.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) &&
+               ((prop.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer);
     });
 
-    const auto createQueueFn = [&](const vk::QueueFlags flags) -> std::optional<QueueInfo> {
-        auto itr = std::ranges::find_if(queueScores, [&](const auto& score) {
-            return ((score.flags & flags) == flags) && (score.queueIndex < score.queueCount);
-        });
-        if (itr == queueScores.end()) {
-            return std::nullopt;
-        }
-        return QueueInfo{
-            .queue       = device.getQueue(itr->familyIndex, itr->queueIndex),
-            .familyIndex = itr->familyIndex,
-            .queueIndex  = ++itr->queueIndex,
-        };
-    };
-
-    // First, we find a general queue:
-    const auto generalQueue =
-        createQueueFn(vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eTransfer);
-    if (!generalQueue) {
-        throw std::runtime_error("Missing required general (graphics, compute, transfer) queue.");
+    if (itr == physDevInfo.queueFamilyProps.end()) {
+        throw std::runtime_error(
+            "Could not find a queue family that supports graphics, compute, and transfer operations.");
     }
 
-    return Queues{
-        .general  = *generalQueue,
-        .compute  = createQueueFn(vk::QueueFlagBits::eCompute),
-        .transfer = createQueueFn(vk::QueueFlagBits::eTransfer),
+    const uint32_t familyIndex = std::distance(itr, physDevInfo.queueFamilyProps.begin());
+    return QueueInfo{
+        .queue       = device.getQueue(familyIndex, 0),
+        .familyIndex = familyIndex,
+        .queueIndex  = 0,
     };
-}
-
-static CommandPools createCommandPools(const vk::Device& device, const Queues& queues)
-{
-    return CommandPools{
-        .general =
-            device.createCommandPoolUnique(vk::CommandPoolCreateInfo{.queueFamilyIndex = queues.general.familyIndex}),
-        .compute  = queues.compute ? device.createCommandPoolUnique(
-                                        vk::CommandPoolCreateInfo{.queueFamilyIndex = queues.compute->familyIndex})
-                                   : vk::UniqueCommandPool{},
-        .transfer = queues.transfer ? device.createCommandPoolUnique(
-                                          vk::CommandPoolCreateInfo{.queueFamilyIndex = queues.transfer->familyIndex})
-                                    : vk::UniqueCommandPool{}};
 }
 
 static UniqueVmaAllocator createVmaAllocator(const vk::Instance& instance, const vk::Device& device,
@@ -364,8 +310,7 @@ Context::Context(const ContextParam& param) :
     debugUtilsMessenger(instance->createDebugUtilsMessengerEXTUnique(DEBUG_UTILS_MSGR_CREATE_INFO)),
     physDevInfo(pickPhysicalDevice(*instance, param, reqDeviceExtensions)),
     device(createDevice(*instance, physDevInfo, reqDeviceExtensions)),
-    queues(createQueues(*device, physDevInfo)),
-    commandPools(createCommandPools(*device, queues)),
+    queueInfo(createQueue(*device, physDevInfo)),
     vmaAllocator(createVmaAllocator(*instance, *device, physDevInfo))
 {}
 
