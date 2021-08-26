@@ -6,6 +6,7 @@
 #include <spdlog/spdlog.h>
 
 #include <context.hpp>
+#include <allocator.hpp>
 #include <scene.hpp>
 
 using namespace prism;
@@ -17,12 +18,13 @@ int main(const int argc, const char** const argv)
     param.enableValidation = true;
 
     try {
-        Context ctx(param);
+        const Context   ctx(param);
+        const Allocator allocator(ctx);
 
         const char* path = "C:\\Users\\jan\\Downloads\\mesh_00028.ply";
         // const char* path = "D:\\Dev\\pbrt-v4-scenes\\barcelona-pavilion\\geometry\\mesh_00014.ply";
 
-        Scene      scene;
+        Scene      scene({});
         const auto meshId      = scene.createMesh(path);
         const auto meshInfo    = std::to_array({Scene::MeshGroup::MeshInfo{meshId}});
         const auto meshGroupId = scene.createMeshGroup(meshInfo);
@@ -37,7 +39,7 @@ int main(const int argc, const char** const argv)
 
         scene.createInstance(instance);
 
-        scene.transferToGpu(ctx);
+        scene.transferToGpu(ctx, allocator);
 
     } catch (const std::exception& e) {
         spdlog::error("Caught exception: {}", e.what());

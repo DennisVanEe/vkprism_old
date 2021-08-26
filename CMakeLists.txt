@@ -6,7 +6,7 @@ cmake_minimum_required (VERSION 3.16)
 project ("vkprism")
 
 # Extern
-add_subdirectory("extern/glfw")
+# add_subdirectory("extern/glfw")
 add_subdirectory("extern/glm")
 add_subdirectory("extern/spdlog")
 

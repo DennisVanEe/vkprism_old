@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include <allocator.hpp>
 #include <context.hpp>
 #include <transform.hpp>
 
@@ -15,6 +16,11 @@
 #include <glm/vec3.hpp>
 
 namespace prism {
+
+struct SceneParam
+{
+    bool compactAccelStruct;
+};
 
 class Scene
 {
@@ -67,9 +73,11 @@ class Scene
         Transform transform;
     };
 
+    Scene(const SceneParam& param) : m_compactAccelStruct(param.compactAccelStruct){};
+
     // Transfer all scene data to the GPU. After this call has finished, all of the data should be on
     // the GPU (it's not async).
-    void transferToGpu(const Context& context);
+    void transferToGpu(const Context& context, const Allocator& allocator);
 
     // Adds a mesh to the Scene, returning the Id of the mesh.
     IdType createMesh(std::string_view path);
@@ -84,9 +92,9 @@ class Scene
     IdType createInstance(const Instance& instance);
 
   private:
-    void createTlas(const Context& context, const vk::CommandPool& commandPool);
-    void createBlas(const Context& context, const vk::CommandPool& commandPool);
-    void transferMeshData(const Context& context, const vk::CommandPool& commandPool);
+    void createTlas(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool);
+    void createBlas(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool);
+    void transferMeshData(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool);
 
     bool validTransformId(IdType id) const { return id < m_transforms.size(); }
     // Transform Ids are often optional, so we add that case here:
@@ -100,6 +108,9 @@ class Scene
 
     bool validMeshGroupId(IdType id) const { return id < m_meshGroups.size(); }
     bool validMeshId(IdType id) const { return id < m_meshes.size(); }
+
+    // TODO: actually enable this:
+    bool m_compactAccelStruct;
 
     // Raw mesh data:
     std::vector<Mesh>                   m_meshes;

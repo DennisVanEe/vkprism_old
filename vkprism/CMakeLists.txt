@@ -17,6 +17,8 @@ add_executable(vkprism
     "src/scene.hpp"
     "src/transform.hpp"
     "src/transform.cpp"
+    "src/allocator.hpp"
+    "src/allocator.cpp"
     # Any external libraries:
     "extern/vma/vk_mem_alloc.cpp"
     "extern/miniply/miniply.cpp")
@@ -33,7 +35,8 @@ target_include_directories(vkprism PUBLIC "src/")
 target_include_directories(vkprism PUBLIC "extern/vma/")
 target_include_directories(vkprism PUBLIC "extern/miniply/")
 
-target_link_libraries(vkprism glfw)
+# For now it'll just be a headless renderer:
+# target_link_libraries(vkprism glfw)
 target_link_libraries(vkprism glm)
 target_link_libraries(vkprism spdlog)
 

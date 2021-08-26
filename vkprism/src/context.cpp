@@ -10,7 +10,6 @@
 #include <tuple>
 #include <vector>
 
-#include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>
 #include <vulkan/vulkan.hpp>
 
@@ -77,17 +76,10 @@ static std::vector<const char*> getRequiredDeviceExtensions(const ContextParam& 
 
 static std::vector<const char*> getRequiredInstanceExtensions(const ContextParam& param)
 {
-    auto reqInstExts = [&]() {
-        uint32_t   glfwInstLayerCnt = 0;
-        const auto glfwInstLayers   = glfwGetRequiredInstanceExtensions(&glfwInstLayerCnt);
-        return std::vector<const char*>(glfwInstLayers, glfwInstLayers + glfwInstLayerCnt);
-    }();
-
     if (param.enableCallback) {
-        reqInstExts.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        return {VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
     }
-
-    return reqInstExts;
+    return {};
 }
 
 static std::vector<const char*> getRequiredInstanceLayers(const ContextParam& param)
@@ -98,32 +90,13 @@ static std::vector<const char*> getRequiredInstanceLayers(const ContextParam& pa
     return {};
 }
 
-static UniqueGLFWWindow createWindowAndInitGLFW(const ContextParam& param)
-{
-    // First we prepare glfw and check that Vulkan is even present:
-    glfwSetErrorCallback(glfwCallback);
-    if (!glfwInit()) {
-        throw std::runtime_error("Could not create Context."); // Details specified in callback
-    }
-
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    const auto window = glfwCreateWindow(param.windowWidth, param.windowHeight, PROJECT_NAME, nullptr, nullptr);
-    if (!window) {
-        throw std::runtime_error("Could not create Context."); // Details specified in callback
-    }
-
-    if (!glfwVulkanSupported()) {
-        throw std::runtime_error("GLFW: Vulkan is not supported or found. Could not create Context.");
-    }
-
-    return UniqueGLFWWindow(window);
-}
-
 static vk::UniqueInstance createInstance(const ContextParam& param, std::span<const char* const> reqInstanceExts,
                                          std::span<const char* const> reqInstanceLayers)
 {
-    // Setup the dynamic loader using GLFW as a dynamic loader:
-    VULKAN_HPP_DEFAULT_DISPATCHER.init(glfwGetInstanceProcAddress);
+    // Setup the dynamic loader:
+    vk::DynamicLoader dynamicLoader;
+    const auto vkGetInstanceProcAddr = dynamicLoader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
 
     const vk::ApplicationInfo applicationInfo{
         .pApplicationName   = PROJECT_NAME,
@@ -203,58 +176,6 @@ static vk::UniqueDevice createDevice(const vk::Instance& instance, const Physica
     return device;
 }
 
-static UniqueVmaAllocator createVmaAllocator(const vk::Instance& instance, const vk::Device& device,
-                                             const PhysicalDeviceInfo& physDevInfo)
-{
-    // We want to use the functions loaded from the dynamic dispatcher. I'm not a big fan of this implementation, I need
-    // to look for a way to automate this process...
-    const VmaVulkanFunctions vkFunctions
-    {
-        .vkGetPhysicalDeviceProperties       = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceProperties,
-        .vkGetPhysicalDeviceMemoryProperties = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceMemoryProperties,
-        .vkAllocateMemory                    = VULKAN_HPP_DEFAULT_DISPATCHER.vkAllocateMemory,
-        .vkFreeMemory                        = VULKAN_HPP_DEFAULT_DISPATCHER.vkFreeMemory,
-        .vkMapMemory                         = VULKAN_HPP_DEFAULT_DISPATCHER.vkMapMemory,
-        .vkUnmapMemory                       = VULKAN_HPP_DEFAULT_DISPATCHER.vkUnmapMemory,
-        .vkFlushMappedMemoryRanges           = VULKAN_HPP_DEFAULT_DISPATCHER.vkFlushMappedMemoryRanges,
-        .vkInvalidateMappedMemoryRanges      = VULKAN_HPP_DEFAULT_DISPATCHER.vkInvalidateMappedMemoryRanges,
-        .vkBindBufferMemory                  = VULKAN_HPP_DEFAULT_DISPATCHER.vkBindBufferMemory,
-        .vkBindImageMemory                   = VULKAN_HPP_DEFAULT_DISPATCHER.vkBindImageMemory,
-        .vkGetBufferMemoryRequirements       = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetBufferMemoryRequirements,
-        .vkGetImageMemoryRequirements        = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetImageMemoryRequirements,
-        .vkCreateBuffer                      = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateBuffer,
-        .vkDestroyBuffer                     = VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroyBuffer,
-        .vkCreateImage                       = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateImage,
-        .vkDestroyImage                      = VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroyImage,
-        .vkCmdCopyBuffer                     = VULKAN_HPP_DEFAULT_DISPATCHER.vkCmdCopyBuffer,
-#if VMA_DEDICATED_ALLOCATION || VMA_VULKAN_VERSION >= 1001000
-        .vkGetBufferMemoryRequirements2KHR = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetBufferMemoryRequirements2,
-        .vkGetImageMemoryRequirements2KHR  = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetImageMemoryRequirements2,
-#endif
-#if VMA_BIND_MEMORY2 || VMA_VULKAN_VERSION >= 1001000
-        .vkBindBufferMemory2KHR = VULKAN_HPP_DEFAULT_DISPATCHER.vkBindBufferMemory2,
-        .vkBindImageMemory2KHR  = VULKAN_HPP_DEFAULT_DISPATCHER.vkBindImageMemory2,
-#endif
-#if VMA_MEMORY_BUDGET || VMA_VULKAN_VERSION >= 1001000
-        .vkGetPhysicalDeviceMemoryProperties2KHR = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceMemoryProperties2,
-#endif
-    };
-
-    const VmaAllocatorCreateInfo createInfo{
-        .flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .physicalDevice   = physDevInfo.physicalDevice,
-        .device           = device,
-        .pVulkanFunctions = &vkFunctions,
-        .instance         = instance,
-        .vulkanApiVersion = VK_API_VERSION_1_2,
-    };
-
-    VmaAllocator allocator;
-    vkCall(vmaCreateAllocator(&createInfo, &allocator));
-
-    return UniqueVmaAllocator(allocator);
-}
-
 PhysicalDeviceInfo::PhysicalDeviceInfo(const vk::PhysicalDevice physicalDevice, const ContextParam& param) :
     physicalDevice(physicalDevice),
     features(physicalDevice.getFeatures2<DEVICE_FEATURES_STRUCTURE>()),
@@ -284,12 +205,10 @@ Context::Context(const ContextParam& param) :
     reqDeviceExtensions(getRequiredDeviceExtensions(param)),
     reqInstanceExtensions(getRequiredInstanceExtensions(param)),
     reqInstanceLayers(getRequiredInstanceLayers(param)),
-    window(createWindowAndInitGLFW(param)),
     instance(createInstance(param, reqInstanceExtensions, reqInstanceLayers)),
     debugUtilsMessenger(instance->createDebugUtilsMessengerEXTUnique(DEBUG_UTILS_MSGR_CREATE_INFO)),
     physDevInfo(pickPhysicalDevice(*instance, param, reqDeviceExtensions)),
-    device(createDevice(*instance, physDevInfo, reqDeviceExtensions)),
-    vmaAllocator(createVmaAllocator(*instance, *device, physDevInfo))
+    device(createDevice(*instance, physDevInfo, reqDeviceExtensions))
 {
     const auto itr = std::ranges::find_if(physDevInfo.queueFamilyProps, [&](const auto& prop) {
         return ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) &&
@@ -304,30 +223,6 @@ Context::Context(const ContextParam& param) :
 
     queueFamilyIdx = std::distance(itr, physDevInfo.queueFamilyProps.begin());
     queue          = device->getQueue(queueFamilyIdx, 0);
-}
-
-UniqueBuffer Context::allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
-                                     const VmaAllocationCreateInfo& allocCreateInfo) const
-{
-    const VkBufferCreateInfo& convBufferCreateInfo = bufferCreateInfo;
-
-    VkBuffer      buffer;
-    VmaAllocation allocation;
-    vmaCreateBuffer(vmaAllocator.get(), &convBufferCreateInfo, &allocCreateInfo, &buffer, &allocation, nullptr);
-
-    return UniqueBuffer(buffer, allocation, vmaAllocator.get());
-}
-
-UniqueBuffer Context::allocateBuffer(size_t size, vk::BufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage) const
-{
-    return allocateBuffer(
-        vk::BufferCreateInfo{
-            .size  = size,
-            .usage = bufferUsage,
-        },
-        VmaAllocationCreateInfo{
-            .usage = memoryUsage,
-        });
 }
 
 } // namespace prism
