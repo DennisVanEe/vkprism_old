@@ -3,6 +3,7 @@
 #include <ranges>
 #include <string>
 #include <vector>
+#include <format>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -240,7 +241,7 @@ void Scene::createBlas(const Context& context, const vk::CommandPool& commandPoo
         // Now that we have created it, we can set the destination location:
         buildGeometryInfo.dstAccelerationStructure = *accelStruct;
 
-        m_blas.emplace_back(std::move(accelStruct), std::move(accelStructBuff));
+        m_blas.emplace_back(std::move(accelStructBuff), std::move(accelStruct));
         maxScratchSize = std::max(maxScratchSize, buildSizeInfo.buildScratchSize);
     }
 
@@ -429,7 +430,8 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
     miniply::PLYReader plyReader(cstrFilepath.c_str());
 
     if (!plyReader.valid()) {
-        throw std::runtime_error(std::format("Could not open or parse PLY file at: {}", filePath));
+        // TODO: replace with std::format
+        throw std::runtime_error("Could not open or parse PLY file at: " + std::string(filePath));
     }
 
     // The data we want to work with:
@@ -446,7 +448,8 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
 
         const auto faceElement = plyReader.get_element(plyReader.find_element(miniply::kPLYFaceElement));
         if (!faceElement) {
-            throw std::runtime_error(std::format("Could not find face elements for PLY file at: {}", filePath));
+            // TODO: replace with std::format
+            throw std::runtime_error("Could not find face elements for PLY file at: " + std::string(filePath));
         }
         faceElement->convert_list_to_fixed_size(faceElement->find_property("vertex_indices"), 3, triIdx.data());
 
@@ -458,7 +461,8 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
 
                 // Check for position data:
                 if (!plyReader.find_pos(vrtIdx.data())) {
-                    throw std::runtime_error(std::format("Missing position data in PLY file at: {}", filePath));
+                    // TODO: replace with std::format
+                    throw std::runtime_error("Missing position data in PLY file at: " + std::string(filePath));
                 }
                 pos.reset(new glm::vec3[numVertices]);
                 plyReader.extract_properties(vrtIdx.data(), 3, miniply::PLYPropertyType::Float, pos.get());
@@ -490,7 +494,8 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
         }
 
         if (!hasVertices || !hasFaces) {
-            throw std::runtime_error(std::format("Poorly formed PLY file at: {}", filePath));
+            // TODO: replace with std::format
+            throw std::runtime_error("Poorly formed PLY file at: " + std::string(filePath));
         }
     }
 

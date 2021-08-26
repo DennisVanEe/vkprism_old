@@ -35,9 +35,16 @@ FORCEINLINE void vkCall(vk::Result result, const std::source_location srcLoc = s
         return;
     }
 
-    throw std::runtime_error(std::format("Received error code: {} in file: {} in function: {} on line: {}",
-                                         vk::to_string(result), srcLoc.file_name(), srcLoc.function_name(),
-                                         srcLoc.line()));
+    std::stringstream ss;
+    ss << "Received error code: " << vk::to_string(result);
+    ss << " in file: " << srcLoc.file_name();
+    ss << " in function: " << srcLoc.function_name();
+    ss << " on line: " << srcLoc.line();
+
+    throw std::runtime_error(ss.str());
+    // throw std::runtime_error(std::format("Received error code: {} in file: {} in function: {} on line: {}",
+    //                                     vk::to_string(result), srcLoc.file_name(), srcLoc.function_name(),
+    //                                     srcLoc.line()));
 }
 
 FORCEINLINE void vkCall(VkResult result, const std::source_location srcLoc = std::source_location::current())

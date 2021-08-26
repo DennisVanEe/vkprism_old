@@ -203,27 +203,6 @@ static vk::UniqueDevice createDevice(const vk::Instance& instance, const Physica
     return device;
 }
 
-static QueueInfo createQueue(const vk::Device& device, const PhysicalDeviceInfo& physDevInfo)
-{
-    const auto itr = std::ranges::find_if(physDevInfo.queueFamilyProps, [&](const auto& prop) {
-        return ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) &&
-               ((prop.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) &&
-               ((prop.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer);
-    });
-
-    if (itr == physDevInfo.queueFamilyProps.end()) {
-        throw std::runtime_error(
-            "Could not find a queue family that supports graphics, compute, and transfer operations.");
-    }
-
-    const uint32_t familyIndex = std::distance(itr, physDevInfo.queueFamilyProps.begin());
-    return QueueInfo{
-        .queue       = device.getQueue(familyIndex, 0),
-        .familyIndex = familyIndex,
-        .queueIndex  = 0,
-    };
-}
-
 static UniqueVmaAllocator createVmaAllocator(const vk::Instance& instance, const vk::Device& device,
                                              const PhysicalDeviceInfo& physDevInfo)
 {
@@ -310,9 +289,22 @@ Context::Context(const ContextParam& param) :
     debugUtilsMessenger(instance->createDebugUtilsMessengerEXTUnique(DEBUG_UTILS_MSGR_CREATE_INFO)),
     physDevInfo(pickPhysicalDevice(*instance, param, reqDeviceExtensions)),
     device(createDevice(*instance, physDevInfo, reqDeviceExtensions)),
-    queueInfo(createQueue(*device, physDevInfo)),
     vmaAllocator(createVmaAllocator(*instance, *device, physDevInfo))
-{}
+{
+    const auto itr = std::ranges::find_if(physDevInfo.queueFamilyProps, [&](const auto& prop) {
+        return ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) &&
+               ((prop.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) &&
+               ((prop.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer);
+    });
+
+    if (itr == physDevInfo.queueFamilyProps.end()) {
+        throw std::runtime_error(
+            "Could not find a queue family that supports graphics, compute, and transfer operations.");
+    }
+
+    queueFamilyIdx = std::distance(itr, physDevInfo.queueFamilyProps.begin());
+    queue          = device->getQueue(queueFamilyIdx, 0);
+}
 
 UniqueBuffer Context::allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
                                      const VmaAllocationCreateInfo& allocCreateInfo) const

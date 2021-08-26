@@ -8,13 +8,13 @@ namespace prism {
 class Transform
 {
   public:
-    bool isIdentity() const { return m_isIdentity; }
+    // TODO: check that the matrix can be decomposed into TRS:
+    Transform(const glm::mat4& mat) : m_matrix(mat) {}
 
     explicit operator vk::TransformMatrixKHR() const;
 
   private:
     glm::mat4 m_matrix;
-    bool      m_isIdentity;
 };
 
 } // namespace prism
