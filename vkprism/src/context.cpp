@@ -90,11 +90,11 @@ static std::vector<const char*> getRequiredInstanceLayers(const ContextParam& pa
     return {};
 }
 
-static vk::UniqueInstance createInstance(const ContextParam& param, std::span<const char* const> reqInstanceExts,
+static vk::UniqueInstance createInstance(const ContextParam& param, const vk::DynamicLoader& dynamicLoader,
+                                         std::span<const char* const> reqInstanceExts,
                                          std::span<const char* const> reqInstanceLayers)
 {
     // Setup the dynamic loader:
-    vk::DynamicLoader dynamicLoader;
     const auto vkGetInstanceProcAddr = dynamicLoader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
     VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
 
@@ -201,28 +201,27 @@ PhysicalDeviceInfo::PhysicalDeviceInfo(const vk::PhysicalDevice physicalDevice, 
 }
 
 Context::Context(const ContextParam& param) :
-    param(param),
-    reqDeviceExtensions(getRequiredDeviceExtensions(param)),
-    reqInstanceExtensions(getRequiredInstanceExtensions(param)),
-    reqInstanceLayers(getRequiredInstanceLayers(param)),
-    instance(createInstance(param, reqInstanceExtensions, reqInstanceLayers)),
-    debugUtilsMessenger(instance->createDebugUtilsMessengerEXTUnique(DEBUG_UTILS_MSGR_CREATE_INFO)),
-    physDevInfo(pickPhysicalDevice(*instance, param, reqDeviceExtensions)),
-    device(createDevice(*instance, physDevInfo, reqDeviceExtensions))
+    m_reqDeviceExtensions(getRequiredDeviceExtensions(param)),
+    m_reqInstanceExtensions(getRequiredInstanceExtensions(param)),
+    m_reqInstanceLayers(getRequiredInstanceLayers(param)),
+    m_instance(createInstance(param, m_dynamicLoader, m_reqInstanceExtensions, m_reqInstanceLayers)),
+    m_debugUtilsMessenger(instance().createDebugUtilsMessengerEXTUnique(DEBUG_UTILS_MSGR_CREATE_INFO)),
+    m_physDevInfo(pickPhysicalDevice(instance(), param, m_reqDeviceExtensions)),
+    m_device(createDevice(instance(), physDevInfo(), m_reqDeviceExtensions))
 {
-    const auto itr = std::ranges::find_if(physDevInfo.queueFamilyProps, [&](const auto& prop) {
+    const auto itr = std::ranges::find_if(physDevInfo().queueFamilyProps, [&](const auto& prop) {
         return ((prop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) &&
                ((prop.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) &&
                ((prop.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer);
     });
 
-    if (itr == physDevInfo.queueFamilyProps.end()) {
+    if (itr == physDevInfo().queueFamilyProps.end()) {
         throw std::runtime_error(
             "Could not find a queue family that supports graphics, compute, and transfer operations.");
     }
 
-    queueFamilyIdx = std::distance(itr, physDevInfo.queueFamilyProps.begin());
-    queue          = device->getQueue(queueFamilyIdx, 0);
+    m_queueFamilyIdx = std::distance(itr, physDevInfo().queueFamilyProps.begin());
+    m_queue          = device().getQueue(m_queueFamilyIdx, 0);
 }
 
 } // namespace prism

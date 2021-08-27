@@ -40,10 +40,10 @@ Allocator::UniqueVmaAllocator Allocator::createVmaAllocator(const Context& conte
 
     const VmaAllocatorCreateInfo createInfo{
         .flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .physicalDevice   = context.physDevInfo.physicalDevice,
-        .device           = *context.device,
+        .physicalDevice   = context.physDevInfo().physicalDevice,
+        .device           = context.device(),
         .pVulkanFunctions = &vkFunctions,
-        .instance         = *context.instance,
+        .instance         = context.instance(),
         .vulkanApiVersion = VK_API_VERSION_1_2,
     };
 

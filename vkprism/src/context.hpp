@@ -45,26 +45,35 @@ struct PhysicalDeviceInfo
     std::vector<vk::QueueFamilyProperties>          queueFamilyProps;
 };
 
-struct Context
+// The context has to outlive anything that requires vulkan functions as it maintains a handle to the vulkan library.
+class Context
 {
+  public:
     explicit Context(const ContextParam& param);
     Context(const Context&) = delete;
     Context(Context&&)      = delete;
 
-    ContextParam param;
+    const vk::Instance&       instance() const { return *m_instance; }
+    const PhysicalDeviceInfo& physDevInfo() const { return m_physDevInfo; }
+    const vk::Device&         device() const { return *m_device; }
+    const uint32_t            queueFamilyIdx() const { return m_queueFamilyIdx; }
+    const vk::Queue&          queue() const { return m_queue; }
 
-    std::vector<const char*> reqDeviceExtensions;
-    std::vector<const char*> reqInstanceExtensions;
-    std::vector<const char*> reqInstanceLayers;
+  private:
+    vk::DynamicLoader m_dynamicLoader;
 
-    vk::UniqueInstance               instance;
-    vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger;
+    std::vector<const char*> m_reqDeviceExtensions;
+    std::vector<const char*> m_reqInstanceExtensions;
+    std::vector<const char*> m_reqInstanceLayers;
 
-    PhysicalDeviceInfo physDevInfo;
-    vk::UniqueDevice   device;
+    vk::UniqueInstance               m_instance;
+    vk::UniqueDebugUtilsMessengerEXT m_debugUtilsMessenger;
 
-    vk::Queue queue;
-    uint32_t  queueFamilyIdx;
+    PhysicalDeviceInfo m_physDevInfo;
+    vk::UniqueDevice   m_device;
+
+    uint32_t  m_queueFamilyIdx;
+    vk::Queue m_queue;
 };
 
 } // namespace prism
