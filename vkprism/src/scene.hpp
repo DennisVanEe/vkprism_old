@@ -17,6 +17,66 @@
 
 namespace prism {
 
+#define MAKE_HANDLE(name)                                                                                              \
+    class name                                                                                                         \
+    {                                                                                                                  \
+        friend class Scene;                                                                                            \
+        explicit name(uint32_t id) : id(id) {}                                                                         \
+        uint32_t id;                                                                                                   \
+    }
+
+MAKE_HANDLE(MeshHandle);
+MAKE_HANDLE(MeshGroupHandle);
+MAKE_HANDLE(InstanceHandle);
+MAKE_HANDLE(TransformHandle);
+
+struct Vertex
+{
+    glm::vec3 pos;
+    glm::vec3 nrm;
+    glm::vec3 tan;
+    glm::vec2 uvs;
+};
+
+struct Mesh
+{
+    bool nrm, tan, uvs; // whether or not these are present
+
+    uint32_t verticesOffset;
+    uint32_t numVertices;
+
+    uint32_t facesOffset;
+    uint32_t numFaces;
+};
+
+// A MeshGroup is a group of mesh that can be instanced. This is equivelant to a BLAS in Vulkan RT terminology.
+struct MeshGroup
+{
+    // MeshInfo is just a pair of mesh Ids and corresponding transformIds (note that if it's none, then it's
+    // the identity transform).
+    struct MeshInfo
+    {
+        MeshHandle                     mesh;
+        std::optional<TransformHandle> transformId;
+    };
+
+    std::vector<MeshInfo> meshes;
+};
+
+// An instance is a poiner to a MeshGroup (that will be instanced) and a corresponding transform id (if not set,
+// then it will be the identity transform). Multi-level instancing will be added later...
+// Each instance is also equiped with a custom instance id. So the shader doesn't have to change. Note that this
+// should be unique.
+struct Instance
+{
+    uint32_t customId;
+    uint32_t mask;
+    uint32_t hitGroupId;
+
+    MeshGroupHandle meshGroup;
+    Transform       transform;
+};
+
 struct SceneParam
 {
     bool compactAccelStruct;
@@ -25,89 +85,20 @@ struct SceneParam
 class Scene
 {
   public:
-    using IdType = uint32_t; // Type used to specify the ID between mesh, nodes, etc.
-
-    struct Vertex
-    {
-        glm::vec3 pos;
-        glm::vec3 nrm;
-        glm::vec3 tan;
-        glm::vec2 uvs;
-    };
-
-    struct Mesh
-    {
-        bool nrm, tan, uvs; // whether or not these are present
-
-        uint32_t verticesOffset;
-        uint32_t numVertices;
-
-        uint32_t facesOffset;
-        uint32_t numFaces;
-    };
-
-    // A MeshGroup is a group of mesh that can be instanced. This is equivelant to a BLAS in Vulkan RT terminology.
-    struct MeshGroup
-    {
-        // MeshInfo is just a pair of mesh Ids and corresponding transformIds (note that if it's none, then it's
-        // the identity transform).
-        struct MeshInfo
-        {
-            IdType                meshId;
-            std::optional<IdType> transformId;
-        };
-
-        std::vector<MeshInfo> meshes;
-    };
-
-    // An instance is a poiner to a MeshGroup (that will be instanced) and a corresponding transform id (if not set,
-    // then it will be the identity transform). Multi-level instancing will be added later...
-    // Each instance is also equiped with a custom instance id. So the shader doesn't have to change. Note that this
-    // should be unique.
-    struct Instance
-    {
-        uint32_t  customId;
-        uint32_t  mask;
-        uint32_t  hitGroupId;
-        IdType    meshGroupId;
-        Transform transform;
-    };
-
     Scene(const SceneParam& param) : m_compactAccelStruct(param.compactAccelStruct){};
 
-    // Transfer all scene data to the GPU. After this call has finished, all of the data should be on
-    // the GPU (it's not async).
+    MeshHandle      createMesh(std::string_view path);
+    TransformHandle createTransform(const Transform& transform);
+    MeshGroupHandle createMeshGroup(std::span<const MeshGroup::MeshInfo> meshInfos);
+    InstanceHandle  createInstance(const Instance& instance);
+
+    // Transfer all scene data to the GPU synchronously.
     void transferToGpu(const Context& context, const Allocator& allocator);
-
-    // Adds a mesh to the Scene, returning the Id of the mesh.
-    IdType createMesh(std::string_view path);
-
-    // Adds a transform to the Scene, returning the Id of the transform.
-    IdType createTransform(const Transform& transform);
-
-    // Creates a mesh group by passing a collection of mesh infos.
-    IdType createMeshGroup(std::span<const MeshGroup::MeshInfo> meshInfos);
-
-    // Creates an instance by passing a collection of mesh infos.
-    IdType createInstance(const Instance& instance);
 
   private:
     void createTlas(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool);
     void createBlas(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool);
     void transferMeshData(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool);
-
-    bool validTransformId(IdType id) const { return id < m_transforms.size(); }
-    // Transform Ids are often optional, so we add that case here:
-    bool validTransformId(std::optional<IdType> id) const
-    {
-        if (id) {
-            return validTransformId(*id);
-        }
-        return true;
-    }
-
-    bool validMeshGroupId(IdType id) const { return id < m_meshGroups.size(); }
-    bool validMeshId(IdType id) const { return id < m_meshes.size(); }
 
     // TODO: actually enable this:
     bool m_compactAccelStruct;
@@ -124,7 +115,7 @@ class Scene
 
     UniqueBuffer m_gpuVertices;
     UniqueBuffer m_gpuFaces;
-    UniqueBuffer m_gpuTransforms;
+    UniqueBuffer m_gpuTransforms; // TODO: is this required after accel structure was built?
 
     struct AccelStructInfo
     {

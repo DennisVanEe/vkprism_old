@@ -5,8 +5,8 @@
 #include <glm/gtx/transform.hpp>
 #include <spdlog/spdlog.h>
 
-#include <context.hpp>
 #include <allocator.hpp>
+#include <context.hpp>
 #include <scene.hpp>
 
 using namespace prism;
@@ -25,16 +25,15 @@ int main(const int argc, const char** const argv)
         // const char* path = "D:\\Dev\\pbrt-v4-scenes\\barcelona-pavilion\\geometry\\mesh_00014.ply";
 
         Scene      scene({});
-        const auto meshId      = scene.createMesh(path);
-        const auto meshInfo    = std::to_array({Scene::MeshGroup::MeshInfo{meshId}});
-        const auto meshGroupId = scene.createMeshGroup(meshInfo);
+        const auto mesh      = scene.createMesh(path);
+        const auto meshGroup = scene.createMeshGroup(std::to_array({MeshGroup::MeshInfo{mesh}}));
 
-        const Scene::Instance instance{
-            .customId    = 0,
-            .mask        = 1,
-            .hitGroupId  = 1,
-            .meshGroupId = meshGroupId,
-            .transform   = Transform(glm::mat4(1.f)),
+        const Instance instance{
+            .customId   = 0,
+            .mask       = 1,
+            .hitGroupId = 1,
+            .meshGroup  = meshGroup,
+            .transform  = Transform(glm::mat4(1.f)),
         };
 
         scene.createInstance(instance);

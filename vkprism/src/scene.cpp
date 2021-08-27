@@ -31,7 +31,7 @@ void Scene::createTlas(const Context& context, const Allocator& allocator, const
                 vk::GeometryInstanceFlagBitsKHR::eTriangleFacingCullDisable),
             .accelerationStructureReference =
                 context.device().getAccelerationStructureAddressKHR(vk::AccelerationStructureDeviceAddressInfoKHR{
-                    .accelerationStructure = *m_blas[instance.meshGroupId].accelStruct,
+                    .accelerationStructure = *m_blas[instance.meshGroup.id].accelStruct,
                 }),
         });
     }
@@ -123,7 +123,6 @@ void Scene::createTlas(const Context& context, const Allocator& allocator, const
     buildGeometryInfo.scratchData.deviceAddress = scratchBuffer.deviceAddress(context.device());
 
     const vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo{.primitiveCount = numInstances};
-
     commandBuffer->buildAccelerationStructuresKHR(buildGeometryInfo, &buildRangeInfo);
 
     commandBuffer->end();
@@ -157,8 +156,8 @@ void Scene::createBlas(const Context& context, const Allocator& allocator, const
     std::vector<vk::AccelerationStructureBuildRangeInfoKHR> buildRangeInfos;
 
     for (const auto& meshGroup : m_meshGroups) {
-        for (const auto& [meshId, transformId] : meshGroup.meshes) {
-            const auto& mesh = m_meshes[meshId];
+        for (const auto& [meshHdl, transformHdl] : meshGroup.meshes) {
+            const auto& mesh = m_meshes[meshHdl.id];
 
             geometries.emplace_back(vk::AccelerationStructureGeometryKHR{
                 .geometryType = vk::GeometryTypeKHR::eTriangles,
@@ -174,7 +173,7 @@ void Scene::createBlas(const Context& context, const Allocator& allocator, const
                             gpuFacesAddr + sizeof(glm::u32vec3) * mesh.facesOffset),
 
                         // We specify the offset in buildRangeInfos:
-                        .transformData = transformId
+                        .transformData = transformHdl
                                              ? vk::DeviceOrHostAddressConstKHR{}.setDeviceAddress(gpuTransformsAddr)
                                              : vk::DeviceOrHostAddressConstKHR{},
                     },
@@ -182,7 +181,7 @@ void Scene::createBlas(const Context& context, const Allocator& allocator, const
                 .flags = vk::GeometryFlagBitsKHR::eOpaque});
             buildRangeInfos.emplace_back(vk::AccelerationStructureBuildRangeInfoKHR{
                 .primitiveCount  = static_cast<uint32_t>(mesh.numFaces),
-                .transformOffset = transformId ? *transformId : 0,
+                .transformOffset = transformHdl ? transformHdl->id : 0,
             });
         }
     }
@@ -220,8 +219,8 @@ void Scene::createBlas(const Context& context, const Allocator& allocator, const
 
         std::vector<uint32_t> maxPrimitiveCounts;
         maxPrimitiveCounts.reserve(meshGroup.meshes.size());
-        for (const auto& mesh : meshGroup.meshes) {
-            maxPrimitiveCounts.emplace_back(m_meshes[mesh.meshId].numFaces);
+        for (const auto& meshInfo : meshGroup.meshes) {
+            maxPrimitiveCounts.emplace_back(m_meshes[meshInfo.mesh.id].numFaces);
         }
 
         const auto buildSizeInfo = context.device().getAccelerationStructureBuildSizesKHR(
@@ -426,7 +425,7 @@ void Scene::transferToGpu(const Context& context, const Allocator& allocator)
     createTlas(context, allocator, *commandPool);
 }
 
-Scene::IdType Scene::createMesh(const std::string_view filePath)
+MeshHandle Scene::createMesh(const std::string_view filePath)
 {
     const std::string  cstrFilepath(filePath);
     miniply::PLYReader plyReader(cstrFilepath.c_str());
@@ -504,7 +503,7 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
     std::copy(faces.get(), faces.get() + numFaces, std::back_inserter(m_faces));
 
     for (size_t i = 0; i < numVertices; ++i) {
-        m_vertices.emplace_back(Scene::Vertex{
+        m_vertices.emplace_back(Vertex{
             .pos = pos[i],
             .nrm = nrm ? nrm[i] : glm::vec3(0.f),
             .tan = tan ? tan[i] : glm::vec3(0.f),
@@ -512,7 +511,7 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
         });
     }
 
-    const IdType meshId = m_meshes.size();
+    const uint32_t meshId = m_meshes.size();
     m_meshes.emplace_back(Mesh{
         .nrm            = static_cast<bool>(nrm),
         .tan            = static_cast<bool>(tan),
@@ -523,40 +522,29 @@ Scene::IdType Scene::createMesh(const std::string_view filePath)
         .numFaces       = numFaces,
     });
 
-    return meshId;
+    return MeshHandle(meshId);
 }
 
-Scene::IdType Scene::createTransform(const Transform& transform)
+TransformHandle Scene::createTransform(const Transform& transform)
 {
-    const IdType id = m_transforms.size();
+    const uint32_t id = m_transforms.size();
     m_transforms.emplace_back(static_cast<vk::TransformMatrixKHR>(transform));
-    return id;
+    return TransformHandle(id);
 }
 
-Scene::IdType Scene::createMeshGroup(const std::span<const MeshGroup::MeshInfo> meshInfos)
+MeshGroupHandle Scene::createMeshGroup(const std::span<const MeshGroup::MeshInfo> meshInfos)
 {
-    // Perform some validation first:
-    if (!std::ranges::all_of(meshInfos, [&](const auto& meshInfo) {
-            return validMeshId(meshInfo.meshId) && validTransformId(meshInfo.transformId);
-        })) {
-        throw std::runtime_error("When creating mesh group invalid transform/mesh id was used.");
-    }
-
-    const IdType id = m_meshGroups.size();
+    const uint32_t id = m_meshGroups.size();
     m_meshGroups.emplace_back(
         MeshGroup{.meshes = std::vector<MeshGroup::MeshInfo>(meshInfos.begin(), meshInfos.end())});
-    return id;
+    return MeshGroupHandle(id);
 }
 
-Scene::IdType Scene::createInstance(const Instance& instance)
+InstanceHandle Scene::createInstance(const Instance& instance)
 {
-    if (!validMeshGroupId(instance.meshGroupId)) {
-        throw std::runtime_error("When creating instance invalid mesh group id was used.");
-    }
-
-    const IdType id = m_instances.size();
+    const uint32_t id = m_instances.size();
     m_instances.emplace_back(instance);
-    return id;
+    return InstanceHandle(id);
 }
 
 } // namespace prism
