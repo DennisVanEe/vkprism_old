@@ -18,27 +18,27 @@ int main(const int argc, const char** const argv)
     param.enableValidation = true;
 
     try {
-        const Context   ctx(param);
-        const Allocator allocator(ctx);
+        const Context      ctx(param);
+        const GpuAllocator allocator(ctx);
 
-        const char* path = "D:\\dennis_stuff\\mesh_00022.ply";
-        // const char* path = "D:\\Dev\\pbrt-v4-scenes\\barcelona-pavilion\\geometry\\mesh_00014.ply";
+        // Create a simple scene:
+        const auto scene = [&]() {
+            SceneBuilder sceneBuilder;
 
-        Scene      scene({});
-        const auto mesh      = scene.createMesh(path);
-        const auto meshGroup = scene.createMeshGroup(std::to_array({MeshGroup::MeshInfo{mesh}}));
+            const char* path = "D:\\dennis_stuff\\mesh_00022.ply";
 
-        const Instance instance{
-            .customId   = 0,
-            .mask       = 1,
-            .hitGroupId = 1,
-            .meshGroup  = meshGroup,
-            .transform  = Transform(glm::mat4(1.f)),
-        };
+            const auto meshIdx      = sceneBuilder.createMesh(path);
+            const auto meshGroupIdx = sceneBuilder.createMeshGroup(std::to_array({PlacedMesh{.meshIdx = meshIdx}}));
+            const auto instanceIdx  = sceneBuilder.createInstance(Instance{
+                .customId     = 0,
+                .mask         = 1,
+                .hitGroupId   = 1,
+                .meshGroupIdx = meshGroupIdx,
+                .transform    = Transform(glm::mat4(1.f)),
+            });
 
-        scene.createInstance(instance);
-
-        scene.transferToGpu(ctx, allocator);
+            return Scene({}, ctx, allocator, sceneBuilder);
+        }();
 
     } catch (const std::exception& e) {
         spdlog::error("Caught exception: {}", e.what());

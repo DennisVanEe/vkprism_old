@@ -2,6 +2,7 @@
 
 #include <format>
 #include <ranges>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -14,418 +15,11 @@
 
 namespace prism {
 
-constexpr uint64_t FENCE_TIMEOUT = 6e+10; // 1 minute (not sure how long this should be...)
-
-void Scene::createTlas(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool)
-{
-    std::vector<vk::AccelerationStructureInstanceKHR> instances;
-    instances.reserve(m_instances.size());
-
-    for (const auto& instance : m_instances) {
-        instances.emplace_back(vk::AccelerationStructureInstanceKHR{
-            .transform                              = static_cast<vk::TransformMatrixKHR>(instance.transform),
-            .instanceCustomIndex                    = instance.customId,
-            .mask                                   = instance.mask,
-            .instanceShaderBindingTableRecordOffset = instance.hitGroupId,
-            .flags                                  = static_cast<vk::GeometryInstanceFlagsKHR::MaskType>(
-                vk::GeometryInstanceFlagBitsKHR::eTriangleFacingCullDisable),
-            .accelerationStructureReference =
-                context.device().getAccelerationStructureAddressKHR(vk::AccelerationStructureDeviceAddressInfoKHR{
-                    .accelerationStructure = *m_blas[instance.meshGroup.id].accelStruct,
-                }),
-        });
-    }
-
-    const uint32_t numInstances = instances.size();
-
-    const auto commandBuffer = std::move(context.device().allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo{
-        .commandPool        = commandPool,
-        .level              = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = 1,
-    })[0]);
-
-    commandBuffer->begin(vk::CommandBufferBeginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-
-    //
-    // Record the command to copy the instance data to the GPU.
-
-    const auto sizeOfInstancesBuff = sizeof(vk::AccelerationStructureInstanceKHR) * instances.size();
-
-    const auto stagingInstances =
-        allocator.allocateBuffer(sizeOfInstancesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-
-    std::ranges::copy(instances, stagingInstances.map<vk::AccelerationStructureInstanceKHR>());
-    stagingInstances.unmap();
-
-    const auto gpuInstances = allocator.allocateBuffer(
-        sizeOfInstancesBuff,
-        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst |
-            vk::BufferUsageFlagBits::eShaderDeviceAddress,
-        VMA_MEMORY_USAGE_GPU_ONLY);
-
-    commandBuffer->copyBuffer(*stagingInstances, *gpuInstances,
-                              vk::BufferCopy{
-                                  .size = sizeOfInstancesBuff,
-                              });
-
-    //
-    // Make sure the instances data is copied to the GPU before we start constructing the TLAS:
-
-    commandBuffer->pipelineBarrier(
-        vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR,
-        vk::DependencyFlags{},
-        vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-                          .dstAccessMask = vk::AccessFlagBits::eAccelerationStructureWriteKHR},
-        {}, {});
-
-    //
-    // Allocate the required memory for constructing the TLAS:
-
-    const vk::AccelerationStructureGeometryKHR geometry{.geometryType = vk::GeometryTypeKHR::eInstances,
-                                                        .geometry = vk::AccelerationStructureGeometryInstancesDataKHR{
-                                                            .arrayOfPointers = VK_FALSE,
-                                                            .data = gpuInstances.deviceAddress(context.device()),
-                                                        }};
-
-    vk::AccelerationStructureBuildGeometryInfoKHR buildGeometryInfo{
-        .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
-        .flags         = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
-        .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
-        .geometryCount = numInstances,
-        .pGeometries   = &geometry,
-    };
-
-    const auto buildSizeInfo = context.device().getAccelerationStructureBuildSizesKHR(
-        vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, numInstances);
-
-    // Allocate the scratch buffer:
-    const auto scratchBuffer = allocator.allocateBuffer(buildSizeInfo.buildScratchSize,
-                                                        vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                                                            vk::BufferUsageFlagBits::eStorageBuffer,
-                                                        VMA_MEMORY_USAGE_GPU_ONLY);
-
-    m_tlas.buffer = allocator.allocateBuffer(buildSizeInfo.accelerationStructureSize,
-                                             vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
-                                                 vk::BufferUsageFlagBits::eShaderDeviceAddress,
-                                             VMA_MEMORY_USAGE_GPU_ONLY);
-
-    //
-    // Record the creation of the TLAS in the command buffer:
-
-    m_tlas.accelStruct = context.device().createAccelerationStructureKHRUnique(vk::AccelerationStructureCreateInfoKHR{
-        //.createFlags, TODO: figure out if this is required or not... (I don't think it is).
-        .buffer = *m_tlas.buffer,
-        .size   = buildSizeInfo.accelerationStructureSize,
-        .type   = vk::AccelerationStructureTypeKHR::eTopLevel,
-    });
-
-    buildGeometryInfo.dstAccelerationStructure  = *m_tlas.accelStruct;
-    buildGeometryInfo.scratchData.deviceAddress = scratchBuffer.deviceAddress(context.device());
-
-    const vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo{.primitiveCount = numInstances};
-    commandBuffer->buildAccelerationStructuresKHR(buildGeometryInfo, &buildRangeInfo);
-
-    commandBuffer->end();
-
-    //
-    // Execute the command buffer and wait for it to finish:
-
-    const auto fence = context.device().createFenceUnique({});
-
-    context.queue().submit(
-        vk::SubmitInfo{
-            .commandBufferCount = 1,
-            .pCommandBuffers    = &*commandBuffer,
-        },
-        *fence);
-
-    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
-        throw std::runtime_error("Fence timed out when waiting for TLAS construction command.");
-    }
-}
-
-void Scene::createBlas(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool)
-{
-    const auto gpuVerticesAddr = m_gpuVertices.deviceAddress(context.device());
-    const auto gpuFacesAddr    = m_gpuFaces.deviceAddress(context.device());
-    const auto gpuTransformsAddr =
-        m_gpuTransforms ? m_gpuTransforms.deviceAddress(context.device()) : vk::DeviceAddress{};
-
-    // Stores structures required for the mesh acceleration structure:
-    std::vector<vk::AccelerationStructureGeometryKHR>       geometries;
-    std::vector<vk::AccelerationStructureBuildRangeInfoKHR> buildRangeInfos;
-
-    for (const auto& meshGroup : m_meshGroups) {
-        for (const auto& [meshHdl, transformHdl] : meshGroup.meshes) {
-            const auto& mesh = m_meshes[meshHdl.id];
-
-            geometries.emplace_back(vk::AccelerationStructureGeometryKHR{
-                .geometryType = vk::GeometryTypeKHR::eTriangles,
-                .geometry =
-                    vk::AccelerationStructureGeometryTrianglesDataKHR{
-                        .vertexFormat = vk::Format::eR32G32B32A32Sfloat, // glm::vec3
-                        .vertexData   = vk::DeviceOrHostAddressConstKHR().setDeviceAddress(
-                            gpuVerticesAddr + sizeof(Vertex) * mesh.verticesOffset),
-                        .vertexStride = sizeof(Vertex),
-                        .maxVertex    = mesh.numVertices - 1,
-                        .indexType    = vk::IndexType::eUint32,
-                        .indexData    = vk::DeviceOrHostAddressConstKHR().setDeviceAddress(
-                            gpuFacesAddr + sizeof(glm::u32vec3) * mesh.facesOffset),
-
-                        // We specify the offset in buildRangeInfos:
-                        .transformData = transformHdl
-                                             ? vk::DeviceOrHostAddressConstKHR{}.setDeviceAddress(gpuTransformsAddr)
-                                             : vk::DeviceOrHostAddressConstKHR{},
-                    },
-
-                .flags = vk::GeometryFlagBitsKHR::eOpaque});
-            buildRangeInfos.emplace_back(vk::AccelerationStructureBuildRangeInfoKHR{
-                .primitiveCount  = static_cast<uint32_t>(mesh.numFaces),
-                .transformOffset = transformHdl ? transformHdl->id : 0,
-            });
-        }
-    }
-
-    std::vector<vk::AccelerationStructureBuildGeometryInfoKHR> buildGeometryInfos;
-    buildGeometryInfos.reserve(m_meshGroups.size());
-
-    size_t currGeometryOffset = 0;
-    for (const auto& meshGroup : m_meshGroups) {
-        const auto flags = m_compactAccelStruct ? vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace |
-                                                      vk::BuildAccelerationStructureFlagBitsKHR::eAllowCompaction
-                                                : vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
-
-        buildGeometryInfos.emplace_back(vk::AccelerationStructureBuildGeometryInfoKHR{
-            .type          = vk::AccelerationStructureTypeKHR::eBottomLevel,
-            .flags         = flags,
-            .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
-            .geometryCount = static_cast<uint32_t>(meshGroup.meshes.size()),
-            .pGeometries   = &geometries[currGeometryOffset],
-        });
-
-        currGeometryOffset += meshGroup.meshes.size();
-    }
-
-    //
-    // Loop over the BLAS structures we are building and check how much memory we need to construct them.
-
-    m_blas.reserve(m_meshGroups.size());
-
-    // We keep track of the maximum amount of scratch space we need to allocate to create the acceleration structure.
-    size_t maxScratchSize = 0;
-    for (uint32_t i = 0; i < m_meshGroups.size(); ++i) {
-        const auto& meshGroup         = m_meshGroups[i];
-        auto&       buildGeometryInfo = buildGeometryInfos[i];
-
-        std::vector<uint32_t> maxPrimitiveCounts;
-        maxPrimitiveCounts.reserve(meshGroup.meshes.size());
-        for (const auto& meshInfo : meshGroup.meshes) {
-            maxPrimitiveCounts.emplace_back(m_meshes[meshInfo.mesh.id].numFaces);
-        }
-
-        const auto buildSizeInfo = context.device().getAccelerationStructureBuildSizesKHR(
-            vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, maxPrimitiveCounts);
-
-        // Allocate space for the acceleration structure:
-        auto accelStructBuff = allocator.allocateBuffer(buildSizeInfo.accelerationStructureSize,
-                                                        vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
-                                                            vk::BufferUsageFlagBits::eShaderDeviceAddress,
-                                                        VMA_MEMORY_USAGE_GPU_ONLY);
-
-        auto accelStruct = context.device().createAccelerationStructureKHRUnique(vk::AccelerationStructureCreateInfoKHR{
-            //.createFlags, TODO: figure out if this is required or not... (I don't think it is).
-            .buffer = *accelStructBuff,
-            .size   = buildSizeInfo.accelerationStructureSize,
-            .type   = vk::AccelerationStructureTypeKHR::eBottomLevel,
-        });
-
-        // Now that we have created it, we can set the destination location:
-        buildGeometryInfo.dstAccelerationStructure = *accelStruct;
-
-        m_blas.emplace_back(std::move(accelStructBuff), std::move(accelStruct));
-        maxScratchSize = std::max(maxScratchSize, buildSizeInfo.buildScratchSize);
-    }
-
-    // We need the query pool if we are performing compaction as we need to know the new sizes of the BLAS:
-    const auto queryPool = m_compactAccelStruct
-                               ? context.device().createQueryPoolUnique(vk::QueryPoolCreateInfo{
-                                     .queryType  = vk::QueryType::eAccelerationStructureCompactedSizeKHR,
-                                     .queryCount = static_cast<uint32_t>(m_meshGroups.size()),
-                                 })
-                               : vk::UniqueQueryPool{};
-
-    // As the sample page explains, we don't want windows to time-out the execution of a single command buffer when
-    // processing many BLAS. To overcome this potential problem, we create a command buffer for each BLAS structure. As
-    // the hardware (apperantely) can't create BLASes in parallel, we can also use just one scratch pad.
-
-    // We have to manually manage these as otherwise it's a pain to submit them later if they were all unique handles.
-    const auto commandBuffers = context.device().allocateCommandBuffers(vk::CommandBufferAllocateInfo{
-        .commandPool        = commandPool,
-        .level              = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = static_cast<uint32_t>(m_meshGroups.size()),
-    });
-    // Defer the destruction here:
-    const Defer commandBufferDestructor([&]() { context.device().freeCommandBuffers(commandPool, commandBuffers); });
-
-    // Allocate enough scratch space to construct the acceleration structure:
-    const auto scratchBuffer = allocator.allocateBuffer(
-        maxScratchSize, vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer,
-        VMA_MEMORY_USAGE_GPU_ONLY);
-    const auto scratchBufferAddr = scratchBuffer.deviceAddress(context.device());
-
-    for (size_t i = 0, currGeometryOffset = 0; i < m_meshGroups.size(); ++i) {
-        auto&       buildGeometryInfo = buildGeometryInfos[i];
-        const auto& meshGroup         = m_meshGroups[i];
-        const auto& commandBuffer     = commandBuffers[i];
-
-        // Start recording:
-        commandBuffer.begin(vk::CommandBufferBeginInfo{
-            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-        });
-
-        buildGeometryInfo.scratchData.deviceAddress = scratchBufferAddr;
-
-        // Apparently we need an array of pointers to the range info, so we make sure to add that here:
-        std::vector<const vk::AccelerationStructureBuildRangeInfoKHR*> buildRangeInfoPtrs;
-        buildRangeInfoPtrs.reserve(meshGroup.meshes.size());
-        for (const auto& rangeInfo : std::span(buildRangeInfos).subspan(currGeometryOffset, meshGroup.meshes.size())) {
-            buildRangeInfoPtrs.emplace_back(&rangeInfo);
-        }
-
-        // Record it:
-        commandBuffer.buildAccelerationStructuresKHR(buildGeometryInfo, buildRangeInfoPtrs);
-
-        // Because we are using one scratch buffer, we have to add a barier to between these commands to make sure we
-        // finish constructing the BLAS before we start the next one.
-        commandBuffer.pipelineBarrier(
-            vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR,
-            vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR, vk::DependencyFlags{},
-            vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eAccelerationStructureWriteKHR,
-                              .dstAccessMask = vk::AccessFlagBits::eAccelerationStructureReadKHR},
-            {}, {});
-
-        commandBuffer.end();
-
-        currGeometryOffset += meshGroup.meshes.size();
-    }
-
-    // Create a fence that we will wait on for all of these operations to finish:
-    const auto fence = context.device().createFenceUnique({});
-
-    context.queue().submit(
-        vk::SubmitInfo{
-            .commandBufferCount = static_cast<uint32_t>(commandBuffers.size()),
-            .pCommandBuffers    = commandBuffers.data(),
-        },
-        *fence);
-
-    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
-        throw std::runtime_error("Fence timed out when waiting for BLAS construction commands.");
-    }
-
-    // If we turned compaction on, then we can move the values over:
-    if (m_compactAccelStruct) {
-        // TODO: finish this later...
-    }
-}
-
-void Scene::transferMeshData(const Context& context, const Allocator& allocator, const vk::CommandPool& commandPool)
-{
-    //
-    // Allocate the command buffer (not very efficient to get vector invovled, but unless this becomes a problem I won't
-    // bother change it).
-    const auto commandBuffer = std::move(context.device().allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo{
-        .commandPool        = commandPool,
-        .level              = vk::CommandBufferLevel::ePrimary,
-        .commandBufferCount = 1,
-    })[0]);
-
-    commandBuffer->begin(vk::CommandBufferBeginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
-
-    //
-    // Transfer mesh vertices and faces:
-    const auto sizeOfVerticesBuff = sizeof(Vertex) * m_vertices.size();
-    const auto sizeOfFacesBuff    = sizeof(glm::u32vec3) * m_faces.size();
-
-    const auto stagingVertices =
-        allocator.allocateBuffer(sizeOfVerticesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-    const auto stagingFaces =
-        allocator.allocateBuffer(sizeOfFacesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-
-    // Map the memory and copy it over:
-    std::ranges::copy(m_vertices, stagingVertices.map<Vertex>());
-    std::ranges::copy(m_faces, stagingFaces.map<glm::u32vec3>());
-    stagingVertices.unmap();
-    stagingFaces.unmap();
-
-    //
-    // Allocate buffers on the GPU where we'll send the data:
-    const auto blasUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                           vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
-    m_gpuVertices = allocator.allocateBuffer(sizeOfVerticesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
-    m_gpuFaces    = allocator.allocateBuffer(sizeOfFacesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
-
-    //
-    // Record the copy command:
-    commandBuffer->copyBuffer(*stagingVertices, *m_gpuVertices,
-                              vk::BufferCopy{
-                                  .size = sizeOfVerticesBuff,
-                              });
-    commandBuffer->copyBuffer(*stagingFaces, *m_gpuFaces,
-                              vk::BufferCopy{
-                                  .size = sizeOfFacesBuff,
-                              });
-
-    // Transforms are optional, so we check for them, but we do need to keep it on the stack as we don't want to destroy
-    // the buffer before we copy from it.
-    const auto stagingTransforms = [&]() {
-        if (!m_transforms.empty()) {
-            const auto sizeOfTransformBuff = sizeof(vk::TransformMatrixKHR) * m_transforms.size();
-
-            auto stagingTransforms = allocator.allocateBuffer(
-                sizeOfTransformBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-            std::ranges::copy(m_transforms, stagingTransforms.map<vk::TransformMatrixKHR>());
-            stagingTransforms.unmap();
-
-            // TODO: I believe we can use the same usage flags, but I'm not sure...
-            m_gpuTransforms = allocator.allocateBuffer(sizeOfTransformBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
-            commandBuffer->copyBuffer(*stagingTransforms, *m_gpuTransforms,
-                                      vk::BufferCopy{
-                                          .size = sizeOfTransformBuff,
-                                      });
-            return stagingTransforms;
-        }
-        return UniqueBuffer{};
-    }();
-
-    commandBuffer->end();
-
-    // Create a fence that we will wait on for all of these operations to finish:
-    const auto fence = context.device().createFenceUnique(vk::FenceCreateInfo{});
-    context.queue().submit(
-        vk::SubmitInfo{
-            .commandBufferCount = 1,
-            .pCommandBuffers    = &*commandBuffer,
-        },
-        *fence);
-
-    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
-        throw std::runtime_error("Fence timed out waiting for mesh data transfer commands.");
-    }
-}
-
-void Scene::transferToGpu(const Context& context, const Allocator& allocator)
-{
-    const auto commandPool = context.device().createCommandPoolUnique(vk::CommandPoolCreateInfo{
-        .flags            = vk::CommandPoolCreateFlagBits::eTransient, // All of the command buffers will be short lived
-        .queueFamilyIndex = context.queueFamilyIdx()});
-
-    transferMeshData(context, allocator, *commandPool);
-    createBlas(context, allocator, *commandPool);
-    createTlas(context, allocator, *commandPool);
-}
-
-MeshHandle Scene::createMesh(const std::string_view filePath)
+//
+// SceneBuilder
+//
+
+MeshIndex SceneBuilder::createMesh(const std::string_view filePath)
 {
     const std::string  cstrFilepath(filePath);
     miniply::PLYReader plyReader(cstrFilepath.c_str());
@@ -522,29 +116,472 @@ MeshHandle Scene::createMesh(const std::string_view filePath)
         .numFaces       = numFaces,
     });
 
-    return MeshHandle(meshId);
+    return MeshIndex(meshId);
 }
 
-TransformHandle Scene::createTransform(const Transform& transform)
+TransformIndex SceneBuilder::createTransform(const Transform& transform)
 {
     const uint32_t id = m_transforms.size();
     m_transforms.emplace_back(static_cast<vk::TransformMatrixKHR>(transform));
-    return TransformHandle(id);
+    return TransformIndex(id);
 }
 
-MeshGroupHandle Scene::createMeshGroup(const std::span<const MeshGroup::MeshInfo> meshInfos)
+MeshGroupIndex SceneBuilder::createMeshGroup(const std::span<const PlacedMesh> placedMeshes)
 {
     const uint32_t id = m_meshGroups.size();
-    m_meshGroups.emplace_back(
-        MeshGroup{.meshes = std::vector<MeshGroup::MeshInfo>(meshInfos.begin(), meshInfos.end())});
-    return MeshGroupHandle(id);
+    m_meshGroups.emplace_back(placedMeshes.begin(), placedMeshes.end());
+    return MeshGroupIndex(id);
 }
 
-InstanceHandle Scene::createInstance(const Instance& instance)
+InstanceIndex SceneBuilder::createInstance(const Instance& instance)
 {
     const uint32_t id = m_instances.size();
     m_instances.emplace_back(instance);
-    return InstanceHandle(id);
+    return InstanceIndex(id);
+}
+
+//
+// Scene
+//
+
+constexpr uint64_t FENCE_TIMEOUT = 6e+10; // 1 minute (not sure how long this should be...)
+
+Scene::Scene(const SceneParam& param, const Context& context, const GpuAllocator& allocator,
+             const SceneBuilder& sceneBuilder)
+{
+    const auto commandPool = context.device().createCommandPoolUnique(vk::CommandPoolCreateInfo{
+        .flags            = vk::CommandPoolCreateFlagBits::eTransient, // All of the command buffers will be short lived
+        .queueFamilyIndex = context.queueFamilyIndex()});
+
+    m_meshGpuData = transferMeshData(context, allocator, *commandPool, sceneBuilder.m_meshes, sceneBuilder.m_vertices,
+                                     sceneBuilder.m_faces, sceneBuilder.m_transforms);
+    m_blases      = createBlas(context, allocator, *commandPool, m_meshGpuData, sceneBuilder.m_meshes,
+                          sceneBuilder.m_meshGroups, param.enableCompaction);
+    m_tlas        = createTlas(context, allocator, *commandPool, sceneBuilder.m_instances, m_blases);
+}
+
+Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GpuAllocator& allocator,
+                                           const vk::CommandPool&                        commandPool,
+                                           const std::span<const SceneBuilder::Mesh>     meshes,
+                                           const std::span<const Vertex>                 vertices,
+                                           const std::span<const glm::u32vec3>           faces,
+                                           const std::span<const vk::TransformMatrixKHR> transforms)
+{
+    //
+    // Allocate the command buffer (not very efficient to get vector invovled, but unless this becomes a problem I won't
+    // bother change it).
+
+    const auto commandBuffer = std::move(context.device().allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo{
+        .commandPool        = commandPool,
+        .level              = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = 1,
+    })[0]);
+
+    commandBuffer->begin(vk::CommandBufferBeginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+
+    //
+    // Transfer mesh vertices and faces:
+    const auto sizeOfVerticesBuff = sizeof(Vertex) * vertices.size();
+    const auto sizeOfFacesBuff    = sizeof(glm::u32vec3) * faces.size();
+
+    const auto stagingVertices =
+        allocator.allocateBuffer(sizeOfVerticesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+    const auto stagingFaces =
+        allocator.allocateBuffer(sizeOfFacesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+
+    // Map the memory and copy it over:
+    std::ranges::copy(vertices, stagingVertices.map<Vertex>());
+    std::ranges::copy(faces, stagingFaces.map<glm::u32vec3>());
+    stagingVertices.unmap();
+    stagingFaces.unmap();
+
+    //
+    // Allocate buffers on the GPU where we'll send the data:
+    const auto blasUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                           vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
+    auto gpuVertices = allocator.allocateBuffer(sizeOfVerticesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+    auto gpuFaces    = allocator.allocateBuffer(sizeOfFacesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+
+    //
+    // Record the copy command:
+    commandBuffer->copyBuffer(*stagingVertices, *gpuVertices,
+                              vk::BufferCopy{
+                                  .size = sizeOfVerticesBuff,
+                              });
+    commandBuffer->copyBuffer(*stagingFaces, *gpuFaces,
+                              vk::BufferCopy{
+                                  .size = sizeOfFacesBuff,
+                              });
+
+    // Transforms are optional, so we check for them, but we need to keep staging transforms on the stack:
+    auto [stagingTransforms, gpuTransforms] = [&]() {
+        if (!transforms.empty()) {
+            const auto sizeOfTransformBuff = sizeof(vk::TransformMatrixKHR) * transforms.size();
+
+            auto stagingTransforms = allocator.allocateBuffer(
+                sizeOfTransformBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+            std::ranges::copy(transforms, stagingTransforms.map<vk::TransformMatrixKHR>());
+            stagingTransforms.unmap();
+
+            // TODO: I believe we can use the same usage flags, but I'm not sure...
+            auto gpuTransforms = allocator.allocateBuffer(sizeOfTransformBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+            commandBuffer->copyBuffer(*stagingTransforms, *gpuTransforms,
+                                      vk::BufferCopy{
+                                          .size = sizeOfTransformBuff,
+                                      });
+            return std::make_tuple(std::move(stagingTransforms), std::move(gpuTransforms));
+        }
+        return std::make_tuple(UniqueBuffer{}, UniqueBuffer{});
+    }();
+
+    commandBuffer->end();
+
+    // Create a fence that we will wait on for all of these operations to finish:
+    const auto fence = context.device().createFenceUnique(vk::FenceCreateInfo{});
+    context.queue().submit(
+        vk::SubmitInfo{
+            .commandBufferCount = 1,
+            .pCommandBuffers    = &*commandBuffer,
+        },
+        *fence);
+
+    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
+        throw std::runtime_error("Fence timed out waiting for mesh data transfer commands.");
+    }
+
+    return MeshGpuData{
+        .vertices   = std::move(gpuVertices),
+        .faces      = std::move(gpuFaces),
+        .transforms = std::move(gpuTransforms),
+    };
+}
+
+std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, const GpuAllocator& allocator,
+                                                      const vk::CommandPool&                         commandPool,
+                                                      const MeshGpuData&                             meshGpuData,
+                                                      const std::span<const SceneBuilder::Mesh>      meshes,
+                                                      const std::span<const std::vector<PlacedMesh>> meshGroups,
+                                                      const bool                                     enableCompaction)
+{
+    const auto gpuVerticesAddr = meshGpuData.vertices.deviceAddress(context.device());
+    const auto gpuFacesAddr    = meshGpuData.faces.deviceAddress(context.device());
+    const auto gpuTransformsAddr =
+        meshGpuData.transforms ? meshGpuData.transforms.deviceAddress(context.device()) : vk::DeviceAddress{};
+
+    // Stores structures required for the mesh acceleration structure:
+    std::vector<vk::AccelerationStructureGeometryKHR>       geometries;
+    std::vector<vk::AccelerationStructureBuildRangeInfoKHR> buildRangeInfos;
+
+    for (const auto& meshGroup : meshGroups) {
+        for (const auto& [meshIdx, transformIdx] : meshGroup) {
+            const auto& mesh = meshes[meshIdx];
+
+            geometries.emplace_back(vk::AccelerationStructureGeometryKHR{
+                .geometryType = vk::GeometryTypeKHR::eTriangles,
+                .geometry =
+                    vk::AccelerationStructureGeometryTrianglesDataKHR{
+                        .vertexFormat = vk::Format::eR32G32B32A32Sfloat, // glm::vec3
+                        .vertexData   = vk::DeviceOrHostAddressConstKHR().setDeviceAddress(
+                            gpuVerticesAddr + sizeof(Vertex) * mesh.verticesOffset),
+                        .vertexStride = sizeof(Vertex),
+                        .maxVertex    = mesh.numVertices - 1,
+                        .indexType    = vk::IndexType::eUint32,
+                        .indexData    = vk::DeviceOrHostAddressConstKHR().setDeviceAddress(
+                            gpuFacesAddr + sizeof(glm::u32vec3) * mesh.facesOffset),
+
+                        // We specify the offset in buildRangeInfos:
+                        .transformData = transformIdx
+                                             ? vk::DeviceOrHostAddressConstKHR{}.setDeviceAddress(gpuTransformsAddr)
+                                             : vk::DeviceOrHostAddressConstKHR{},
+                    },
+
+                .flags = vk::GeometryFlagBitsKHR::eOpaque});
+            buildRangeInfos.emplace_back(vk::AccelerationStructureBuildRangeInfoKHR{
+                .primitiveCount  = static_cast<uint32_t>(mesh.numFaces),
+                .transformOffset = transformIdx ? *transformIdx : 0u,
+            });
+        }
+    }
+
+    std::vector<vk::AccelerationStructureBuildGeometryInfoKHR> buildGeometryInfos;
+    buildGeometryInfos.reserve(meshGroups.size());
+
+    size_t currGeometryOffset = 0;
+    for (const auto& meshGroup : meshGroups) {
+        const auto flags = enableCompaction ? vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace |
+                                                  vk::BuildAccelerationStructureFlagBitsKHR::eAllowCompaction
+                                            : vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
+
+        buildGeometryInfos.emplace_back(vk::AccelerationStructureBuildGeometryInfoKHR{
+            .type          = vk::AccelerationStructureTypeKHR::eBottomLevel,
+            .flags         = flags,
+            .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
+            .geometryCount = static_cast<uint32_t>(meshGroup.size()),
+            .pGeometries   = &geometries[currGeometryOffset],
+        });
+
+        currGeometryOffset += meshGroup.size();
+    }
+
+    //
+    // Loop over the BLAS structures we are building and check how much memory we need to construct them.
+
+    std::vector<AccelStructInfo> blases;
+    blases.reserve(meshGroups.size());
+
+    // We keep track of the maximum amount of scratch space we need to allocate to create the acceleration structure.
+    size_t maxScratchSize = 0;
+    for (uint32_t i = 0; i < meshGroups.size(); ++i) {
+        const auto& meshGroup         = meshGroups[i];
+        auto&       buildGeometryInfo = buildGeometryInfos[i];
+
+        std::vector<uint32_t> maxPrimitiveCounts;
+        maxPrimitiveCounts.reserve(meshGroup.size());
+        for (const auto& [meshIdx, _] : meshGroup) {
+            maxPrimitiveCounts.emplace_back(meshes[meshIdx].numFaces);
+        }
+
+        const auto buildSizeInfo = context.device().getAccelerationStructureBuildSizesKHR(
+            vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, maxPrimitiveCounts);
+
+        // Allocate space for the acceleration structure:
+        auto accelStructBuff = allocator.allocateBuffer(buildSizeInfo.accelerationStructureSize,
+                                                        vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+                                                            vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                                        VMA_MEMORY_USAGE_GPU_ONLY);
+
+        auto accelStruct = context.device().createAccelerationStructureKHRUnique(vk::AccelerationStructureCreateInfoKHR{
+            //.createFlags, TODO: figure out if this is required or not... (I don't think it is).
+            .buffer = *accelStructBuff,
+            .size   = buildSizeInfo.accelerationStructureSize,
+            .type   = vk::AccelerationStructureTypeKHR::eBottomLevel,
+        });
+
+        // Now that we have created it, we can set the destination location:
+        buildGeometryInfo.dstAccelerationStructure = *accelStruct;
+
+        blases.emplace_back(std::move(accelStructBuff), std::move(accelStruct));
+        maxScratchSize = std::max(maxScratchSize, buildSizeInfo.buildScratchSize);
+    }
+
+    // We need the query pool if we are performing compaction as we need to know the new sizes of the BLAS:
+    const auto queryPool = enableCompaction ? context.device().createQueryPoolUnique(vk::QueryPoolCreateInfo{
+                                                  .queryType  = vk::QueryType::eAccelerationStructureCompactedSizeKHR,
+                                                  .queryCount = static_cast<uint32_t>(meshGroups.size()),
+                                              })
+                                            : vk::UniqueQueryPool{};
+
+    // As the Nvidia tutorial explains, we don't want windows to time-out the execution of a single command buffer when
+    // processing many BLAS. To overcome this potential problem, we create a command buffer for each BLAS structure. As
+    // the hardware (apperantely) can't create BLASes in parallel, we can also use just one scratch pad.
+
+    // We have to manually manage these as otherwise it's a pain to submit them later if they were all unique handles.
+    const auto commandBuffers = context.device().allocateCommandBuffers(vk::CommandBufferAllocateInfo{
+        .commandPool        = commandPool,
+        .level              = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = static_cast<uint32_t>(meshGroups.size()),
+    });
+    // Defer the destruction here:
+    const Defer commandBufferDestructor([&]() { context.device().freeCommandBuffers(commandPool, commandBuffers); });
+
+    // Allocate enough scratch space to construct the acceleration structure:
+    const auto scratchBuffer = allocator.allocateBuffer(
+        maxScratchSize, vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eStorageBuffer,
+        VMA_MEMORY_USAGE_GPU_ONLY);
+    const auto scratchBufferAddr = scratchBuffer.deviceAddress(context.device());
+
+    for (size_t i = 0, currGeometryOffset = 0; i < meshGroups.size(); ++i) {
+        auto&       buildGeometryInfo = buildGeometryInfos[i];
+        const auto& meshGroup         = meshGroups[i];
+        const auto& commandBuffer     = commandBuffers[i];
+
+        // Start recording:
+        commandBuffer.begin(vk::CommandBufferBeginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        });
+
+        buildGeometryInfo.scratchData.deviceAddress = scratchBufferAddr;
+
+        // Apparently we need an array of pointers to the range info, so we make sure to add that here:
+        std::vector<const vk::AccelerationStructureBuildRangeInfoKHR*> buildRangeInfoPtrs;
+        buildRangeInfoPtrs.reserve(meshGroup.size());
+        for (const auto& rangeInfo : std::span(buildRangeInfos).subspan(currGeometryOffset, meshGroup.size())) {
+            buildRangeInfoPtrs.emplace_back(&rangeInfo);
+        }
+
+        // Record it:
+        commandBuffer.buildAccelerationStructuresKHR(buildGeometryInfo, buildRangeInfoPtrs);
+
+        // Because we are using one scratch buffer, we have to add a barier to between these commands to make sure we
+        // finish constructing the BLAS before we start the next one.
+        commandBuffer.pipelineBarrier(
+            vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR,
+            vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR, vk::DependencyFlags{},
+            vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eAccelerationStructureWriteKHR,
+                              .dstAccessMask = vk::AccessFlagBits::eAccelerationStructureReadKHR},
+            {}, {});
+
+        commandBuffer.end();
+
+        currGeometryOffset += meshGroup.size();
+    }
+
+    // Create a fence that we will wait on for all of these operations to finish:
+    const auto fence = context.device().createFenceUnique({});
+
+    context.queue().submit(
+        vk::SubmitInfo{
+            .commandBufferCount = static_cast<uint32_t>(commandBuffers.size()),
+            .pCommandBuffers    = commandBuffers.data(),
+        },
+        *fence);
+
+    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
+        throw std::runtime_error("Fence timed out when waiting for BLAS construction commands.");
+    }
+
+    // If we turned compaction on, then we can move the values over:
+    if (enableCompaction) {
+        // TODO: finish this later...
+    }
+
+    return blases;
+}
+
+Scene::AccelStructInfo Scene::createTlas(const Context& context, const GpuAllocator& allocator,
+                                         const vk::CommandPool& commandPool, const std::span<const Instance> instances,
+                                         const std::span<const AccelStructInfo> blases)
+{
+    //
+    // Convert instances to vulkan instances.
+
+    std::vector<vk::AccelerationStructureInstanceKHR> vkInstances;
+    vkInstances.reserve(instances.size());
+
+    for (const auto& instance : instances) {
+        vkInstances.emplace_back(vk::AccelerationStructureInstanceKHR{
+            .transform                              = static_cast<vk::TransformMatrixKHR>(instance.transform),
+            .instanceCustomIndex                    = instance.customId,
+            .mask                                   = instance.mask,
+            .instanceShaderBindingTableRecordOffset = instance.hitGroupId,
+            .flags                                  = static_cast<vk::GeometryInstanceFlagsKHR::MaskType>(
+                vk::GeometryInstanceFlagBitsKHR::eTriangleFacingCullDisable),
+            .accelerationStructureReference =
+                context.device().getAccelerationStructureAddressKHR(vk::AccelerationStructureDeviceAddressInfoKHR{
+                    .accelerationStructure = *blases[instance.meshGroupIdx].accelStruct,
+                }),
+        });
+    }
+
+    const uint32_t numInstances = instances.size();
+
+    const auto commandBuffer = std::move(context.device().allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo{
+        .commandPool        = commandPool,
+        .level              = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = 1,
+    })[0]);
+
+    commandBuffer->begin(vk::CommandBufferBeginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+
+    //
+    // Record the command to copy the instance data to the GPU.
+
+    const auto sizeOfInstancesBuff = sizeof(vk::AccelerationStructureInstanceKHR) * instances.size();
+
+    const auto stagingInstances =
+        allocator.allocateBuffer(sizeOfInstancesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+
+    std::ranges::copy(vkInstances, stagingInstances.map<vk::AccelerationStructureInstanceKHR>());
+    stagingInstances.unmap();
+
+    const auto gpuInstances = allocator.allocateBuffer(
+        sizeOfInstancesBuff,
+        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst |
+            vk::BufferUsageFlagBits::eShaderDeviceAddress,
+        VMA_MEMORY_USAGE_GPU_ONLY);
+
+    commandBuffer->copyBuffer(*stagingInstances, *gpuInstances,
+                              vk::BufferCopy{
+                                  .size = sizeOfInstancesBuff,
+                              });
+
+    //
+    // Make sure the instances data is copied to the GPU before we start constructing the TLAS:
+
+    commandBuffer->pipelineBarrier(
+        vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAccelerationStructureBuildKHR,
+        vk::DependencyFlags{},
+        vk::MemoryBarrier{.srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+                          .dstAccessMask = vk::AccessFlagBits::eAccelerationStructureWriteKHR},
+        {}, {});
+
+    //
+    // Allocate the required memory for constructing the TLAS:
+
+    const vk::AccelerationStructureGeometryKHR geometry{.geometryType = vk::GeometryTypeKHR::eInstances,
+                                                        .geometry = vk::AccelerationStructureGeometryInstancesDataKHR{
+                                                            .arrayOfPointers = VK_FALSE,
+                                                            .data = gpuInstances.deviceAddress(context.device()),
+                                                        }};
+
+    vk::AccelerationStructureBuildGeometryInfoKHR buildGeometryInfo{
+        .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
+        .flags         = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+        .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
+        .geometryCount = numInstances,
+        .pGeometries   = &geometry,
+    };
+
+    const auto buildSizeInfo = context.device().getAccelerationStructureBuildSizesKHR(
+        vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, numInstances);
+
+    // Allocate the scratch buffer:
+    const auto scratchBuffer = allocator.allocateBuffer(buildSizeInfo.buildScratchSize,
+                                                        vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                                                            vk::BufferUsageFlagBits::eStorageBuffer,
+                                                        VMA_MEMORY_USAGE_GPU_ONLY);
+
+    // Allocate the buffer where we will store the tlas:
+    auto tlasBuffer = allocator.allocateBuffer(buildSizeInfo.accelerationStructureSize,
+                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+                                                   vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                               VMA_MEMORY_USAGE_GPU_ONLY);
+
+    //
+    // Record the creation of the TLAS in the command buffer:
+
+    auto tlasAccelStruct = context.device().createAccelerationStructureKHRUnique(vk::AccelerationStructureCreateInfoKHR{
+        //.createFlags, TODO: figure out if this is required or not... (I don't think it is).
+        .buffer = *tlasBuffer,
+        .size   = buildSizeInfo.accelerationStructureSize,
+        .type   = vk::AccelerationStructureTypeKHR::eTopLevel,
+    });
+
+    buildGeometryInfo.dstAccelerationStructure  = *tlasAccelStruct;
+    buildGeometryInfo.scratchData.deviceAddress = scratchBuffer.deviceAddress(context.device());
+
+    const vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo{.primitiveCount = numInstances};
+    commandBuffer->buildAccelerationStructuresKHR(buildGeometryInfo, &buildRangeInfo);
+
+    commandBuffer->end();
+
+    //
+    // Execute the command buffer and wait for it to finish:
+
+    const auto fence = context.device().createFenceUnique({});
+
+    context.queue().submit(
+        vk::SubmitInfo{
+            .commandBufferCount = 1,
+            .pCommandBuffers    = &*commandBuffer,
+        },
+        *fence);
+
+    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
+        throw std::runtime_error("Fence timed out when waiting for TLAS construction command.");
+    }
+
+    return AccelStructInfo{.buffer = std::move(tlasBuffer), .accelStruct = std::move(tlasAccelStruct)};
 }
 
 } // namespace prism

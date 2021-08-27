@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <vk_mem_alloc.hpp>
@@ -11,38 +12,12 @@
 
 namespace prism {
 
-#define DEVICE_FEATURES_STRUCTURE                                                                                      \
-    vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan12Features,               \
-        vk::PhysicalDeviceAccelerationStructureFeaturesKHR, vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
-
-#define DEVICE_PROPERTIES_STRUCTURE                                                                                    \
-    vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties, vk::PhysicalDeviceVulkan12Properties
-
-struct QueueInfo
-{
-    vk::Queue queue;
-    uint32_t  familyIndex;
-    uint32_t  queueIndex;
-};
-
 struct ContextParam
 {
     bool enableValidation = false;
     bool enableCallback   = false;
 
     bool enableRobustBufferAccess = true;
-};
-
-struct PhysicalDeviceInfo
-{
-    PhysicalDeviceInfo(vk::PhysicalDevice physicalDevice, const ContextParam& param);
-    PhysicalDeviceInfo(PhysicalDeviceInfo const&) = delete;
-    PhysicalDeviceInfo(PhysicalDeviceInfo&&)      = delete;
-
-    vk::PhysicalDevice                              physicalDevice;
-    vk::StructureChain<DEVICE_FEATURES_STRUCTURE>   features;
-    vk::StructureChain<DEVICE_PROPERTIES_STRUCTURE> properties;
-    std::vector<vk::QueueFamilyProperties>          queueFamilyProps;
 };
 
 // The context has to outlive anything that requires vulkan functions as it maintains a handle to the vulkan library.
@@ -54,10 +29,48 @@ class Context
     Context(Context&&)      = delete;
 
     const vk::Instance&       instance() const { return *m_instance; }
-    const PhysicalDeviceInfo& physDevInfo() const { return m_physDevInfo; }
+    const vk::PhysicalDevice& physicalDevice() const { return m_physDevInfo.physicalDevice; }
     const vk::Device&         device() const { return *m_device; }
-    const uint32_t            queueFamilyIdx() const { return m_queueFamilyIdx; }
-    const vk::Queue&          queue() const { return m_queue; }
+    const uint32_t            queueFamilyIndex() const { return m_queueInfo.familyIndex; }
+    const vk::Queue&          queue() const { return m_queueInfo.queue; }
+
+  private:
+#define DEVICE_FEATURES_STRUCTURE                                                                                      \
+    vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan12Features,               \
+        vk::PhysicalDeviceAccelerationStructureFeaturesKHR, vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
+
+#define DEVICE_PROPERTIES_STRUCTURE                                                                                    \
+    vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties, vk::PhysicalDeviceVulkan12Properties
+
+    struct PhysicalDeviceInfo
+    {
+        PhysicalDeviceInfo(const vk::PhysicalDevice& physicalDevice, const ContextParam& param);
+
+        vk::PhysicalDevice                              physicalDevice;
+        vk::StructureChain<DEVICE_FEATURES_STRUCTURE>   features;
+        vk::StructureChain<DEVICE_PROPERTIES_STRUCTURE> properties;
+        std::vector<vk::QueueFamilyProperties>          queueFamilyProps;
+    };
+
+    struct QueueInfo
+    {
+        uint32_t  familyIndex;
+        vk::Queue queue;
+    };
+
+  private:
+    static std::vector<const char*> getRequiredDeviceExtensions(const ContextParam& param);
+    static std::vector<const char*> getRequiredInstanceExtensions(const ContextParam& param);
+    static std::vector<const char*> getRequiredInstanceLayers(const ContextParam& param);
+
+    static vk::UniqueInstance createInstance(const ContextParam& param, const vk::DynamicLoader& dynamicLoader,
+                                             std::span<const char* const> reqInstanceExts,
+                                             std::span<const char* const> reqInstanceLayers);
+    static PhysicalDeviceInfo createPhysicalDeviceInfo(const vk::Instance& instance, const ContextParam& param,
+                                                       std::span<const char* const> reqDeviceExts);
+    static vk::UniqueDevice   createDevice(const vk::Instance& instance, const PhysicalDeviceInfo& physDevInfo,
+                                           std::span<const char* const> reqDeviceExts);
+    static QueueInfo          createQueueInfo(const vk::Device& device, const PhysicalDeviceInfo& physDevInfo);
 
   private:
     vk::DynamicLoader m_dynamicLoader;
@@ -72,8 +85,7 @@ class Context
     PhysicalDeviceInfo m_physDevInfo;
     vk::UniqueDevice   m_device;
 
-    uint32_t  m_queueFamilyIdx;
-    vk::Queue m_queue;
+    QueueInfo m_queueInfo;
 };
 
 } // namespace prism

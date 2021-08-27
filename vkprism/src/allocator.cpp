@@ -2,7 +2,7 @@
 
 namespace prism {
 
-Allocator::UniqueVmaAllocator Allocator::createVmaAllocator(const Context& context)
+GpuAllocator::UniqueVmaAllocator GpuAllocator::createVmaAllocator(const Context& context)
 {
     // We want to use the functions loaded from the dynamic dispatcher. I'm not a big fan of this implementation, I need
     // to look for a way to automate this process...
@@ -40,7 +40,7 @@ Allocator::UniqueVmaAllocator Allocator::createVmaAllocator(const Context& conte
 
     const VmaAllocatorCreateInfo createInfo{
         .flags            = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .physicalDevice   = context.physDevInfo().physicalDevice,
+        .physicalDevice   = context.physicalDevice(),
         .device           = context.device(),
         .pVulkanFunctions = &vkFunctions,
         .instance         = context.instance(),
@@ -53,10 +53,10 @@ Allocator::UniqueVmaAllocator Allocator::createVmaAllocator(const Context& conte
     return UniqueVmaAllocator(allocator);
 }
 
-Allocator::Allocator(const Context& context) : m_vmaAllocator(createVmaAllocator(context)) {}
+GpuAllocator::GpuAllocator(const Context& context) : m_vmaAllocator(createVmaAllocator(context)) {}
 
-UniqueBuffer Allocator::allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
-                                     const VmaAllocationCreateInfo& allocCreateInfo) const
+UniqueBuffer GpuAllocator::allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
+                                          const VmaAllocationCreateInfo& allocCreateInfo) const
 {
     const VkBufferCreateInfo& convBufferCreateInfo = bufferCreateInfo;
 
@@ -67,7 +67,8 @@ UniqueBuffer Allocator::allocateBuffer(const vk::BufferCreateInfo&    bufferCrea
     return UniqueBuffer(buffer, allocation, m_vmaAllocator.get());
 }
 
-UniqueBuffer Allocator::allocateBuffer(size_t size, vk::BufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage) const
+UniqueBuffer GpuAllocator::allocateBuffer(size_t size, vk::BufferUsageFlags bufferUsage,
+                                          VmaMemoryUsage memoryUsage) const
 {
     return allocateBuffer(
         vk::BufferCreateInfo{

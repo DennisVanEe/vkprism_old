@@ -67,7 +67,7 @@ class UniqueBuffer
     void unmap() const { vmaUnmapMemory(m_allocator, m_allocation); }
 
   private:
-    friend class Allocator;
+    friend class GpuAllocator;
     UniqueBuffer(VkBuffer buffer, VmaAllocation allocation, VmaAllocator allocator) :
         m_buffer(buffer), m_allocation(allocation), m_allocator(allocator)
     {}
@@ -77,12 +77,12 @@ class UniqueBuffer
     VmaAllocator  m_allocator  = nullptr;
 };
 
-class Allocator
+class GpuAllocator
 {
   public:
-    Allocator(const Context& context);
-    Allocator(const Allocator&) = delete;
-    Allocator(Allocator&&)      = delete;
+    GpuAllocator(const Context& context);
+    GpuAllocator(const GpuAllocator&) = delete;
+    GpuAllocator(GpuAllocator&&)      = delete;
 
     UniqueBuffer allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
                                 const VmaAllocationCreateInfo& allocCreateInfo) const;

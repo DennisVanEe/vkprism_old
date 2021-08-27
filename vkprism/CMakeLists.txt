@@ -19,6 +19,8 @@ add_executable(vkprism
     "src/transform.cpp"
     "src/allocator.hpp"
     "src/allocator.cpp"
+    "src/pipeline.hpp"
+    "src/pipeline.cpp"
     # Any external libraries:
     "extern/vma/vk_mem_alloc.cpp"
     "extern/miniply/miniply.cpp")
