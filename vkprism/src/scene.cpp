@@ -36,6 +36,8 @@ void Scene::createTlas(const Context& context, const Allocator& allocator, const
         });
     }
 
+    const uint32_t numInstances = instances.size();
+
     const auto commandBuffer = std::move(context.device().allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo{
         .commandPool        = commandPool,
         .level              = vk::CommandBufferLevel::ePrimary,
@@ -56,7 +58,9 @@ void Scene::createTlas(const Context& context, const Allocator& allocator, const
     stagingInstances.unmap();
 
     const auto gpuInstances = allocator.allocateBuffer(
-        sizeOfInstancesBuff, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+        sizeOfInstancesBuff,
+        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst |
+            vk::BufferUsageFlagBits::eShaderDeviceAddress,
         VMA_MEMORY_USAGE_GPU_ONLY);
 
     commandBuffer->copyBuffer(*stagingInstances, *gpuInstances,
@@ -87,12 +91,12 @@ void Scene::createTlas(const Context& context, const Allocator& allocator, const
         .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
         .flags         = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
         .mode          = vk::BuildAccelerationStructureModeKHR::eBuild,
-        .geometryCount = static_cast<uint32_t>(instances.size()),
+        .geometryCount = numInstances,
         .pGeometries   = &geometry,
     };
 
     const auto buildSizeInfo = context.device().getAccelerationStructureBuildSizesKHR(
-        vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo);
+        vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, numInstances);
 
     // Allocate the scratch buffer:
     const auto scratchBuffer = allocator.allocateBuffer(buildSizeInfo.buildScratchSize,
@@ -118,8 +122,7 @@ void Scene::createTlas(const Context& context, const Allocator& allocator, const
     buildGeometryInfo.dstAccelerationStructure  = *m_tlas.accelStruct;
     buildGeometryInfo.scratchData.deviceAddress = scratchBuffer.deviceAddress(context.device());
 
-    const vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo{.primitiveCount =
-                                                                        static_cast<uint32_t>(instances.size())};
+    const vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo{.primitiveCount = numInstances};
 
     commandBuffer->buildAccelerationStructuresKHR(buildGeometryInfo, &buildRangeInfo);
 
