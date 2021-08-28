@@ -13,7 +13,7 @@ class UniqueBuffer
   public:
     UniqueBuffer() = default;
 
-    UniqueBuffer(UniqueBuffer&& other) :
+    UniqueBuffer(UniqueBuffer&& other) noexcept :
         m_buffer(other.m_buffer), m_allocation(other.m_allocation), m_allocator(other.m_allocator)
     {
         // After moving, the object should be in a valid state (due to destructors...).
@@ -22,7 +22,7 @@ class UniqueBuffer
         other.m_buffer = VK_NULL_HANDLE;
     }
 
-    UniqueBuffer& operator=(UniqueBuffer&& other)
+    UniqueBuffer& operator=(UniqueBuffer&& other) noexcept
     {
         if (this == &other) {
             return *this;
