@@ -45,10 +45,10 @@ Pipeline::Descriptor<NumSets>::Descriptor(const Context&                        
     std::array<vk::DescriptorSetLayout, NumSets> setLayouts;
     setLayouts.fill(*setLayout);
 
-    auto descriptorSetVec = context.device().allocateDescriptorSetsUnique(vk::DescriptorSetAllocateInfo{
+    auto descriptorSetVec = context.device().allocateDescriptorSets(vk::DescriptorSetAllocateInfo{
         .descriptorPool = *pool, .descriptorSetCount = NumSets, .pSetLayouts = setLayouts.data()});
 
-    std::ranges::move(descriptorSetVec, set.begin());
+    std::ranges::copy(descriptorSetVec, set.begin());
 }
 
 Pipeline::Descriptors Pipeline::createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers)
@@ -69,7 +69,7 @@ Pipeline::Descriptors Pipeline::createDescriptors(const Context& context, const 
                      }));
 
         const vk::StructureChain<vk::WriteDescriptorSet, vk::WriteDescriptorSetAccelerationStructureKHR> tlasWrite{
-            vk::WriteDescriptorSet{.dstSet          = *descriptor.set[0],
+            vk::WriteDescriptorSet{.dstSet          = descriptor.set[0],
                                    .dstBinding      = 0,
                                    .dstArrayElement = 0,
                                    .descriptorCount = 1,
@@ -82,7 +82,7 @@ Pipeline::Descriptors Pipeline::createDescriptors(const Context& context, const 
 
         const vk::DescriptorBufferInfo outputBufferInfo{.buffer = *buffers.output, .range = VK_WHOLE_SIZE};
         const vk::WriteDescriptorSet   outputWrite{
-            .dstSet          = *descriptor.set[0],
+            .dstSet          = descriptor.set[0],
             .dstBinding      = 1,
             .dstArrayElement = 0,
             .descriptorCount = 1,

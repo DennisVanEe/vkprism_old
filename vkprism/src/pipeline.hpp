@@ -29,9 +29,9 @@ class Pipeline
     {
         Descriptor(const Context& context, std::span<const vk::DescriptorSetLayoutBinding> bindings);
 
-        vk::UniqueDescriptorSetLayout                setLayout;
-        vk::UniqueDescriptorPool                     pool;
-        std::array<vk::UniqueDescriptorSet, NumSets> set;
+        vk::UniqueDescriptorSetLayout          setLayout;
+        vk::UniqueDescriptorPool               pool;
+        std::array<vk::DescriptorSet, NumSets> set;
     };
 
     struct Descriptors
