@@ -9,7 +9,7 @@ namespace prism {
 
 Pipeline::Buffers Pipeline::createBuffers(const PipelineParam& param, const GpuAllocator& allocator)
 {
-    Buffers{.output = allocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
+    return Buffers{.output = allocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
                                                vk::BufferUsageFlagBits::eStorageBuffer |
                                                    vk::BufferUsageFlagBits::eTransferSrc,
                                                VMA_MEMORY_USAGE_GPU_ONLY)};
