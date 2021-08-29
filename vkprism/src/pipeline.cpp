@@ -10,9 +10,9 @@ namespace prism {
 Pipeline::Buffers Pipeline::createBuffers(const PipelineParam& param, const GpuAllocator& allocator)
 {
     return Buffers{.output = allocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
-                                               vk::BufferUsageFlagBits::eStorageBuffer |
-                                                   vk::BufferUsageFlagBits::eTransferSrc,
-                                               VMA_MEMORY_USAGE_GPU_ONLY)};
+                                                      vk::BufferUsageFlagBits::eStorageBuffer |
+                                                          vk::BufferUsageFlagBits::eTransferSrc,
+                                                      VMA_MEMORY_USAGE_GPU_ONLY)};
 }
 
 template <size_t NumSets>
@@ -100,9 +100,33 @@ Pipeline::Descriptors Pipeline::createDescriptors(const Context& context, const 
     };
 }
 
-Pipeline::Pipeline(const PipelineParam& param, const Context& context, const GpuAllocator& allocator,
-                   const Scene& scene) :
-    m_buffers(createBuffers(param, allocator)), m_descriptors(createDescriptors(context, scene, m_buffers))
+Pipeline::Pipeline(const PipelineParam& param, const Context& context, const Shaders& shaders,
+                   const GpuAllocator& allocator, const Scene& scene) :
+    m_buffers(createBuffers(param, allocator)),
+    m_descriptors(createDescriptors(context, scene, m_buffers)),
+    m_raytracingPipeline(createRaytracingPipeline(context, m_descriptors, shaders))
 {}
+
+Pipeline::RaytracingPipeline Pipeline::createRaytracingPipeline(const Context& context, const Descriptors& descriptors,
+                                                                const Shaders& shaders)
+{
+    enum ShaderStage : size_t
+    {
+        Raygen,
+        Miss,
+        ClosestHit,
+        COUNT,
+    };
+
+    const auto k = shaders.getModule(Shaders::RAYGEN);
+
+    //std::array<vk::PipelineShaderStageCreateInfo, ShaderStage::COUNT> shaderStages;
+    //shaderStages[ShaderStage::Raygen] =
+    //    vk::PipelineShaderStageCreateInfo{.stage  = vk::ShaderStageFlagBits::eRaygenKHR,
+    //                                      .module = shaders.getModule<Shaders::RAYGEN>(),
+    //                                      .pName  = "main"};
+
+    return RaytracingPipeline();
+}
 
 } // namespace prism

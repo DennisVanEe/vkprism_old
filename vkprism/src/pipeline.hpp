@@ -1,11 +1,11 @@
 #pragma once
 
-#include "pipeline.hpp"
+#include <array>
 
 #include <allocator.hpp>
-#include <array>
 #include <context.hpp>
 #include <scene.hpp>
+#include <shaders.hpp>
 
 #include <vulkan/vulkan.hpp>
 
@@ -20,9 +20,16 @@ struct PipelineParam
 class Pipeline
 {
   public:
-    Pipeline(const PipelineParam& param, const Context& context, const GpuAllocator& allocator, const Scene& scene);
+    Pipeline(const PipelineParam& param, const Context& context, const Shaders& shaders, const GpuAllocator& allocator,
+             const Scene& scene);
 
   private:
+    // All of the buffers the pipeline will use (output buffer, ray queues, etc.):
+    struct Buffers
+    {
+        UniqueBuffer output;
+    };
+
     // For our use case, we only need one descriptor set. If any more are needed, add them here as appropriate.
     template <size_t NumSets>
     struct Descriptor
@@ -39,19 +46,20 @@ class Pipeline
         Descriptor<1> raygen;
     };
 
-    // All of the buffers the pipeline will use (output buffer, ray queues, etc.):
-    struct Buffers
-    {
-        UniqueBuffer output;
-    };
+    struct RaytracingPipeline
+    {};
 
   private:
-    static Buffers     createBuffers(const PipelineParam& param, const GpuAllocator& allocator);
-    static Descriptors createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers);
+    static Buffers            createBuffers(const PipelineParam& param, const GpuAllocator& allocator);
+    static Descriptors        createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers);
+    static RaytracingPipeline createRaytracingPipeline(const Context& context, const Descriptors& descriptors,
+                                                       const Shaders& shaders);
 
   private:
     Buffers     m_buffers;
     Descriptors m_descriptors;
+
+    RaytracingPipeline m_raytracingPipeline;
 };
 
 } // namespace prism
