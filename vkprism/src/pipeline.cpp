@@ -110,7 +110,7 @@ Pipeline::Pipeline(const PipelineParam& param, const Context& context, const Sha
 Pipeline::RaytracingPipeline Pipeline::createRaytracingPipeline(const Context& context, const Descriptors& descriptors,
                                                                 const Shaders& shaders)
 {
-    enum ShaderStage : size_t
+    enum ShaderStageIdx : uint32_t
     {
         Raygen,
         Miss,
@@ -118,13 +118,44 @@ Pipeline::RaytracingPipeline Pipeline::createRaytracingPipeline(const Context& c
         COUNT,
     };
 
-    const auto k = shaders.getModule(Shaders::RAYGEN);
+    const auto shaderStages = [&]() {
+        std::array<vk::PipelineShaderStageCreateInfo, ShaderStageIdx::COUNT> shaderStages;
+        shaderStages[ShaderStageIdx::Raygen] =
+            vk::PipelineShaderStageCreateInfo{.stage  = vk::ShaderStageFlagBits::eRaygenKHR,
+                                              .module = shaders.getModule(Shaders::RAYGEN),
+                                              .pName  = "main"};
+        shaderStages[ShaderStageIdx::Miss] = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eMissKHR, .module = shaders.getModule(Shaders::MISS), .pName = "main"};
+        shaderStages[ShaderStageIdx::ClosestHit] =
+            vk::PipelineShaderStageCreateInfo{.stage  = vk::ShaderStageFlagBits::eClosestHitKHR,
+                                              .module = shaders.getModule(Shaders::CLOSEST_HIT),
+                                              .pName  = "main"};
+        return shaderStages;
+    }();
 
-    //std::array<vk::PipelineShaderStageCreateInfo, ShaderStage::COUNT> shaderStages;
-    //shaderStages[ShaderStage::Raygen] =
-    //    vk::PipelineShaderStageCreateInfo{.stage  = vk::ShaderStageFlagBits::eRaygenKHR,
-    //                                      .module = shaders.getModule<Shaders::RAYGEN>(),
-    //                                      .pName  = "main"};
+    const auto shaderGroups = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+                                                 .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                                                 .generalShader      = ShaderStageIdx::Raygen,
+                                                 .closestHitShader   = VK_SHADER_UNUSED_KHR,
+                                                 .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                                                 .intersectionShader = VK_SHADER_UNUSED_KHR,
+                                             },
+                                             vk::RayTracingShaderGroupCreateInfoKHR{
+                                                 .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                                                 .generalShader      = ShaderStageIdx::Miss,
+                                                 .closestHitShader   = VK_SHADER_UNUSED_KHR,
+                                                 .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                                                 .intersectionShader = VK_SHADER_UNUSED_KHR,
+                                             },
+                                             vk::RayTracingShaderGroupCreateInfoKHR{
+                                                 .type          = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
+                                                 .generalShader = VK_SHADER_UNUSED_KHR,
+                                                 .closestHitShader   = ShaderStageIdx::ClosestHit,
+                                                 .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                                                 .intersectionShader = VK_SHADER_UNUSED_KHR,
+                                             }});
+
+
 
     return RaytracingPipeline();
 }

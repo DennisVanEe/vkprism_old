@@ -11,7 +11,7 @@ Shaders::Shaders(const Context& context)
     const std::string SHADER_ROOT_PATH = "/shaders/";
 
     for (size_t i = 0; i < m_shaderNames.size(); ++i) {
-        const auto    path = SHADER_ROOT_PATH + m_shaderNames[i] + ".spv";
+        const auto    path = SHADER_ROOT_PATH + std::string(m_shaderNames[i]) + ".spv";
         std::ifstream shaderFile(path, std::ios::binary);
 
         if (!shaderFile.is_open()) {
