@@ -8,7 +8,7 @@
 #include <allocator.hpp>
 #include <context.hpp>
 #include <scene.hpp>
-#include <pipeline.hpp>
+#include <pipelines.hpp>
 
 using namespace prism;
 
@@ -41,7 +41,7 @@ int main(const int argc, const char** const argv)
             return Scene({}, ctx, allocator, sceneBuilder);
         }();
 
-        const Pipeline pipeline(PipelineParam{.outputWidth = 1920, .outputHeight = 1080}, ctx, allocator, scene);
+        const Pipelines pipeline(PipelineParam{.outputWidth = 1920, .outputHeight = 1080}, ctx, allocator, scene);
 
     } catch (const std::exception& e) {
         spdlog::error("Caught exception: {}", e.what());

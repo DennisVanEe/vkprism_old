@@ -19,8 +19,8 @@ add_executable(vkprism
     "src/transform.cpp"
     "src/allocator.hpp"
     "src/allocator.cpp"
-    "src/pipeline.hpp"
-    "src/pipeline.cpp"
+    "src/pipelines.hpp"
+    "src/pipelines.cpp"
     "src/shaders.hpp"
     "src/shaders.cpp"
     # Any external libraries:

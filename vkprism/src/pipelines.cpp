@@ -1,4 +1,4 @@
-#include "pipeline.hpp"
+#include "pipelines.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,7 +7,7 @@
 
 namespace prism {
 
-Pipeline::Buffers Pipeline::createBuffers(const PipelineParam& param, const GpuAllocator& allocator)
+Pipelines::Buffers Pipelines::createBuffers(const PipelineParam& param, const GpuAllocator& allocator)
 {
     return Buffers{.output = allocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
                                                       vk::BufferUsageFlagBits::eStorageBuffer |
@@ -16,8 +16,8 @@ Pipeline::Buffers Pipeline::createBuffers(const PipelineParam& param, const GpuA
 }
 
 template <size_t NumSets>
-Pipeline::Descriptor<NumSets>::Descriptor(const Context&                                        context,
-                                          const std::span<const vk::DescriptorSetLayoutBinding> bindings)
+Pipelines::Descriptor<NumSets>::Descriptor(const Context&                                        context,
+                                           const std::span<const vk::DescriptorSetLayoutBinding> bindings)
 {
     setLayout = context.device().createDescriptorSetLayoutUnique(vk::DescriptorSetLayoutCreateInfo{
         .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data()});
@@ -51,7 +51,7 @@ Pipeline::Descriptor<NumSets>::Descriptor(const Context&                        
     std::ranges::copy(descriptorSetVec, set.begin());
 }
 
-Pipeline::Descriptors Pipeline::createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers)
+Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers)
 {
     auto raygen = [&]() {
         Descriptor<1> descriptor(
@@ -100,15 +100,14 @@ Pipeline::Descriptors Pipeline::createDescriptors(const Context& context, const 
     };
 }
 
-Pipeline::Pipeline(const PipelineParam& param, const Context& context, const Shaders& shaders,
-                   const GpuAllocator& allocator, const Scene& scene) :
+Pipelines::Pipelines(const PipelineParam& param, const Context& context, const GpuAllocator& allocator,
+                     const Scene& scene) :
     m_buffers(createBuffers(param, allocator)),
     m_descriptors(createDescriptors(context, scene, m_buffers)),
-    m_raytracingPipeline(createRaytracingPipeline(context, m_descriptors, shaders))
+    m_rtPipeline(createRTPipeline(context, m_descriptors))
 {}
 
-Pipeline::RaytracingPipeline Pipeline::createRaytracingPipeline(const Context& context, const Descriptors& descriptors,
-                                                                const Shaders& shaders)
+Pipelines::Pipeline Pipelines::createRTPipeline(const Context& context, const Descriptors& descriptors)
 {
     enum ShaderStageIdx : uint32_t
     {
@@ -118,18 +117,18 @@ Pipeline::RaytracingPipeline Pipeline::createRaytracingPipeline(const Context& c
         COUNT,
     };
 
+    const auto raygenShader            = loadShaderUnique(context, SHADER_FILE_RAYGEN);
+    const auto missShader              = loadShaderUnique(context, SHADER_FILE_MISS);
+    const auto closestClosestHitShader = loadShaderUnique(context, SHADER_FILE_CLOSEST_HIT);
+
     const auto shaderStages = [&]() {
         std::array<vk::PipelineShaderStageCreateInfo, ShaderStageIdx::COUNT> shaderStages;
-        shaderStages[ShaderStageIdx::Raygen] =
-            vk::PipelineShaderStageCreateInfo{.stage  = vk::ShaderStageFlagBits::eRaygenKHR,
-                                              .module = shaders.getModule(Shaders::RAYGEN),
-                                              .pName  = "main"};
+        shaderStages[ShaderStageIdx::Raygen] = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eRaygenKHR, .module = *raygenShader, .pName = "main"};
         shaderStages[ShaderStageIdx::Miss] = vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eMissKHR, .module = shaders.getModule(Shaders::MISS), .pName = "main"};
-        shaderStages[ShaderStageIdx::ClosestHit] =
-            vk::PipelineShaderStageCreateInfo{.stage  = vk::ShaderStageFlagBits::eClosestHitKHR,
-                                              .module = shaders.getModule(Shaders::CLOSEST_HIT),
-                                              .pName  = "main"};
+            .stage = vk::ShaderStageFlagBits::eMissKHR, .module = *missShader, .pName = "main"};
+        shaderStages[ShaderStageIdx::ClosestHit] = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eClosestHitKHR, .module = *closestClosestHitShader, .pName = "main"};
         return shaderStages;
     }();
 
@@ -155,9 +154,41 @@ Pipeline::RaytracingPipeline Pipeline::createRaytracingPipeline(const Context& c
                                                  .intersectionShader = VK_SHADER_UNUSED_KHR,
                                              }});
 
+    // For now, each shader will get the same data from the push constant, will fine tune in the future:
+    const vk::PushConstantRange pushConstRange{.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR |
+                                                             vk::ShaderStageFlagBits::eClosestHitKHR |
+                                                             vk::ShaderStageFlagBits::eMissKHR,
+                                               .offset = 0,
+                                               .size   = sizeof(RTPushConst)};
 
+    auto pipelineLayout = context.device().createPipelineLayoutUnique(
+        vk::PipelineLayoutCreateInfo{.setLayoutCount         = 1,
+                                     .pSetLayouts            = &*descriptors.raygen.setLayout,
+                                     .pushConstantRangeCount = 1,
+                                     .pPushConstantRanges    = &pushConstRange});
 
-    return RaytracingPipeline();
+    const vk::RayTracingPipelineCreateInfoKHR pipelineCreateInfo{
+        .stageCount                   = static_cast<uint32_t>(shaderStages.size()),
+        .pStages                      = shaderStages.data(),
+        .groupCount                   = static_cast<uint32_t>(shaderGroups.size()),
+        .pGroups                      = shaderGroups.data(),
+        .maxPipelineRayRecursionDepth = 1, // No recursion will be used, instead queues and whatnot...
+        .layout                       = *pipelineLayout,
+    };
+
+    auto pipeline = [&]() {
+        auto result = context.device().createRayTracingPipelinesKHRUnique({}, {}, pipelineCreateInfo);
+        switch (result.result) {
+        case vk::Result::eSuccess:
+        case vk::Result::eOperationDeferredKHR:
+        case vk::Result::eOperationNotDeferredKHR:
+        case vk::Result::ePipelineCompileRequiredEXT:
+            return std::move(result.value[0]);
+        }
+        vkCall(result.result);
+    }();
+
+    return Pipeline{.layout = std::move(pipelineLayout), .pipeline = std::move(pipeline)};
 }
 
 } // namespace prism

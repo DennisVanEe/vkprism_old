@@ -11,17 +11,20 @@
 
 namespace prism {
 
+// Not sure where this is defined, but here we will place it:
+constexpr size_t MIN_PUSH_CONST_SIZE = 128;
+
 struct PipelineParam
 {
     uint32_t outputWidth;
     uint32_t outputHeight;
 };
 
-class Pipeline
+class Pipelines
 {
   public:
-    Pipeline(const PipelineParam& param, const Context& context, const Shaders& shaders, const GpuAllocator& allocator,
-             const Scene& scene);
+    Pipelines(const PipelineParam& param, const Context& context, const GpuAllocator& allocator,
+              const Scene& scene);
 
   private:
     // All of the buffers the pipeline will use (output buffer, ray queues, etc.):
@@ -46,20 +49,28 @@ class Pipeline
         Descriptor<1> raygen;
     };
 
-    struct RaytracingPipeline
+    struct Pipeline
+    {
+        vk::UniquePipelineLayout layout;
+        vk::UniquePipeline       pipeline;
+    };
+
+    //
+    // Any push constants are defined here:
+
+    struct RTPushConst
     {};
 
   private:
-    static Buffers            createBuffers(const PipelineParam& param, const GpuAllocator& allocator);
-    static Descriptors        createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers);
-    static RaytracingPipeline createRaytracingPipeline(const Context& context, const Descriptors& descriptors,
-                                                       const Shaders& shaders);
+    static Buffers     createBuffers(const PipelineParam& param, const GpuAllocator& allocator);
+    static Descriptors createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers);
+    static Pipeline    createRTPipeline(const Context& context, const Descriptors& descriptors);
 
   private:
     Buffers     m_buffers;
     Descriptors m_descriptors;
 
-    RaytracingPipeline m_raytracingPipeline;
+    Pipeline m_rtPipeline;
 };
 
 } // namespace prism
