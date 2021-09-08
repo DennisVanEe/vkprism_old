@@ -67,4 +67,11 @@ class Defer
     F m_func;
 };
 
+// Simple function that rounds up to the nearest value with the specified alignment:
+template<typename T>
+T alignUp(T size, T alignment)
+{
+    return (size + (alignment - 1)) & ~(alignment - 1);
+}
+
 } // namespace prism

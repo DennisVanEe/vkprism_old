@@ -5,6 +5,8 @@
 #include <ranges>
 #include <vector>
 
+#include <util.hpp>
+
 namespace prism {
 
 Pipelines::Buffers Pipelines::createBuffers(const PipelineParam& param, const GpuAllocator& allocator)
@@ -104,68 +106,102 @@ Pipelines::Pipelines(const PipelineParam& param, const Context& context, const G
                      const Scene& scene) :
     m_buffers(createBuffers(param, allocator)),
     m_descriptors(createDescriptors(context, scene, m_buffers)),
-    m_rtPipeline(createRTPipeline(context, m_descriptors))
+    m_rtPipeline(context, m_descriptors)
 {}
 
-Pipelines::Pipeline Pipelines::createRTPipeline(const Context& context, const Descriptors& descriptors)
+Pipelines::RTPipeline::RTPipeline(const Context& context, const Descriptors& descriptors)
 {
-    enum ShaderStageIdx : uint32_t
-    {
-        Raygen,
-        Miss,
-        ClosestHit,
-        COUNT,
-    };
-
-    const auto raygenShader            = loadShaderUnique(context, SHADER_FILE_RAYGEN);
-    const auto missShader              = loadShaderUnique(context, SHADER_FILE_MISS);
-    const auto closestClosestHitShader = loadShaderUnique(context, SHADER_FILE_CLOSEST_HIT);
-
-    const auto shaderStages = [&]() {
-        std::array<vk::PipelineShaderStageCreateInfo, ShaderStageIdx::COUNT> shaderStages;
-        shaderStages[ShaderStageIdx::Raygen] = vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eRaygenKHR, .module = *raygenShader, .pName = "main"};
-        shaderStages[ShaderStageIdx::Miss] = vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eMissKHR, .module = *missShader, .pName = "main"};
-        shaderStages[ShaderStageIdx::ClosestHit] = vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eClosestHitKHR, .module = *closestClosestHitShader, .pName = "main"};
-        return shaderStages;
-    }();
-
-    const auto shaderGroups = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
-                                                 .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
-                                                 .generalShader      = ShaderStageIdx::Raygen,
-                                                 .closestHitShader   = VK_SHADER_UNUSED_KHR,
-                                                 .anyHitShader       = VK_SHADER_UNUSED_KHR,
-                                                 .intersectionShader = VK_SHADER_UNUSED_KHR,
-                                             },
-                                             vk::RayTracingShaderGroupCreateInfoKHR{
-                                                 .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
-                                                 .generalShader      = ShaderStageIdx::Miss,
-                                                 .closestHitShader   = VK_SHADER_UNUSED_KHR,
-                                                 .anyHitShader       = VK_SHADER_UNUSED_KHR,
-                                                 .intersectionShader = VK_SHADER_UNUSED_KHR,
-                                             },
-                                             vk::RayTracingShaderGroupCreateInfoKHR{
-                                                 .type          = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
-                                                 .generalShader = VK_SHADER_UNUSED_KHR,
-                                                 .closestHitShader   = ShaderStageIdx::ClosestHit,
-                                                 .anyHitShader       = VK_SHADER_UNUSED_KHR,
-                                                 .intersectionShader = VK_SHADER_UNUSED_KHR,
-                                             }});
+    //
+    // Create the pipeline layout:
 
     // For now, each shader will get the same data from the push constant, will fine tune in the future:
     const vk::PushConstantRange pushConstRange{.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR |
                                                              vk::ShaderStageFlagBits::eClosestHitKHR |
                                                              vk::ShaderStageFlagBits::eMissKHR,
                                                .offset = 0,
-                                               .size   = sizeof(RTPushConst)};
+                                               .size   = sizeof(PushConst)};
 
-    auto pipelineLayout = context.device().createPipelineLayoutUnique(
+    m_layout = context.device().createPipelineLayoutUnique(
         vk::PipelineLayoutCreateInfo{.setLayoutCount         = 1,
                                      .pSetLayouts            = &*descriptors.raygen.setLayout,
                                      .pushConstantRangeCount = 1,
                                      .pPushConstantRanges    = &pushConstRange});
+
+    //
+    // Set the shader stages and the groups up:
+
+    // Load all of the shaders first:
+
+    const auto shaderStages = [&]() {
+        std::array<vk::PipelineShaderStageCreateInfo, TOTAL_NUM_SHADERS> shaderStages;
+        shaderStages[sRAYGEN] = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eRaygenKHR, .module = loadShader(context, sRAYGEN), .pName = "main"};
+        shaderStages[sMISS] = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eMissKHR, .module = loadShader(context, sMISS), .pName = "main"};
+        shaderStages[sCLOSEST_HIT] = vk::PipelineShaderStageCreateInfo{.stage = vk::ShaderStageFlagBits::eClosestHitKHR,
+                                                                       .module = loadShader(context, sCLOSEST_HIT),
+                                                                       .pName  = "main"};
+        return shaderStages;
+    }();
+    // Make sure to delete them at the end:
+    Defer shaderStageCleanup([&]() {
+        for (const auto& stage : shaderStages) {
+            context.device().destroyShaderModule(stage.module);
+        }
+    });
+
+    // Now, specify all of the shader groups:
+    enum ShaderGroup : uint32_t
+    {
+        RaygenIdx,
+        MissIdx,
+        HitIdx,
+        CallableIdx,
+    };
+
+    const auto [shaderGroups, numRaygenGroups, numMissGroups, numHitGroups, numCallableGroups] = [&]() {
+        const auto raygenGroups = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+            .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+            .generalShader      = sRAYGEN,
+            .closestHitShader   = VK_SHADER_UNUSED_KHR,
+            .anyHitShader       = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+        }});
+        const auto missGroups   = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+            .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+            .generalShader      = sMISS,
+            .closestHitShader   = VK_SHADER_UNUSED_KHR,
+            .anyHitShader       = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+        }});
+        const auto hitGroups    = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+            .type               = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
+            .generalShader      = VK_SHADER_UNUSED_KHR,
+            .closestHitShader   = sCLOSEST_HIT,
+            .anyHitShader       = VK_SHADER_UNUSED_KHR,
+            .intersectionShader = VK_SHADER_UNUSED_KHR,
+        }});
+        const std::array<vk::RayTracingShaderGroupCreateInfoKHR, 0> callableGroups;
+
+        //
+        // Kind of messy, but we essentially combine the shader groups:
+
+        std::array<vk::RayTracingShaderGroupCreateInfoKHR,
+                   raygenGroups.size() + missGroups.size() + hitGroups.size() + callableGroups.size()>
+            shaderGroups;
+
+        auto shaderGroupsItr = shaderGroups.begin();
+        std::ranges::copy(raygenGroups, shaderGroupsItr);
+        shaderGroupsItr += raygenGroups.size();
+        std::ranges::copy(missGroups, shaderGroupsItr);
+        shaderGroupsItr += missGroups.size();
+        std::ranges::copy(hitGroups, shaderGroupsItr);
+        shaderGroupsItr += hitGroups.size();
+        std::ranges::copy(callableGroups, shaderGroupsItr);
+
+        return std::make_tuple(shaderGroups, raygenGroups.size(), missGroups.size(), hitGroups.size(),
+                               callableGroups.size());
+    }();
 
     const vk::RayTracingPipelineCreateInfoKHR pipelineCreateInfo{
         .stageCount                   = static_cast<uint32_t>(shaderStages.size()),
@@ -173,10 +209,10 @@ Pipelines::Pipeline Pipelines::createRTPipeline(const Context& context, const De
         .groupCount                   = static_cast<uint32_t>(shaderGroups.size()),
         .pGroups                      = shaderGroups.data(),
         .maxPipelineRayRecursionDepth = 1, // No recursion will be used, instead queues and whatnot...
-        .layout                       = *pipelineLayout,
+        .layout                       = *m_layout,
     };
 
-    auto pipeline = [&]() {
+    m_pipeline = [&]() {
         auto result = context.device().createRayTracingPipelinesKHRUnique({}, {}, pipelineCreateInfo);
         switch (result.result) {
         case vk::Result::eSuccess:
@@ -188,7 +224,13 @@ Pipelines::Pipeline Pipelines::createRTPipeline(const Context& context, const De
         vkCall(result.result);
     }();
 
-    return Pipeline{.layout = std::move(pipelineLayout), .pipeline = std::move(pipeline)};
+    //
+    // Create the shader binding table:
+
+    const auto& rtPipelineProps = context.properties().get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
+    const auto  alignedGroupSize =
+        alignUp(rtPipelineProps.shaderGroupHandleSize, rtPipelineProps.shaderGroupBaseAlignment);
+    const auto sbtSize = static_cast<uint32_t>(shaderGroups.size()) * alignedGroupSize;
 }
 
 } // namespace prism

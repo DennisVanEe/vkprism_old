@@ -276,26 +276,29 @@ std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, co
         for (const auto& [meshIdx, transformIdx] : meshGroup) {
             const auto& mesh = meshes[meshIdx];
 
-            geometries.emplace_back(vk::AccelerationStructureGeometryKHR{
-                .geometryType = vk::GeometryTypeKHR::eTriangles,
-                .geometry =
-                    vk::AccelerationStructureGeometryTrianglesDataKHR{
-                        .vertexFormat = vk::Format::eR32G32B32A32Sfloat, // glm::vec3
-                        .vertexData   = vk::DeviceOrHostAddressConstKHR().setDeviceAddress(
-                            gpuVerticesAddr + sizeof(Vertex) * mesh.verticesOffset),
-                        .vertexStride = sizeof(Vertex),
-                        .maxVertex    = mesh.numVertices - 1,
-                        .indexType    = vk::IndexType::eUint32,
-                        .indexData    = vk::DeviceOrHostAddressConstKHR().setDeviceAddress(
-                            gpuFacesAddr + sizeof(glm::u32vec3) * mesh.facesOffset),
+            geometries.emplace_back(
+                vk::AccelerationStructureGeometryKHR{
+                    .geometryType = vk::GeometryTypeKHR::eTriangles,
+                    .geometry =
+                        vk::AccelerationStructureGeometryTrianglesDataKHR{
+                            .vertexFormat = vk::Format::eR32G32B32A32Sfloat, // glm::vec3
+                            .vertexData =
+                                vk::DeviceOrHostAddressConstKHR{.deviceAddress = gpuVerticesAddr +
+                                                                                 sizeof(Vertex) * mesh.verticesOffset},
+                            .vertexStride = sizeof(Vertex),
+                            .maxVertex    = mesh.numVertices - 1,
+                            .indexType    = vk::IndexType::eUint32,
+                            .indexData =
+                                vk::DeviceOrHostAddressConstKHR{.deviceAddress = gpuFacesAddr + sizeof(glm::u32vec3) *
+                                                                                                    mesh.facesOffset},
 
-                        // We specify the offset in buildRangeInfos:
-                        .transformData = transformIdx
-                                             ? vk::DeviceOrHostAddressConstKHR{}.setDeviceAddress(gpuTransformsAddr)
-                                             : vk::DeviceOrHostAddressConstKHR{},
-                    },
+                            // We specify the offset in buildRangeInfos:
+                            .transformData = transformIdx
+                                                 ? vk::DeviceOrHostAddressConstKHR{.deviceAddress = gpuTransformsAddr}
+                                                 : vk::DeviceOrHostAddressConstKHR{},
+                        },
 
-                .flags = vk::GeometryFlagBitsKHR::eOpaque});
+                    .flags = vk::GeometryFlagBitsKHR::eOpaque});
             buildRangeInfos.emplace_back(vk::AccelerationStructureBuildRangeInfoKHR{
                 .primitiveCount  = static_cast<uint32_t>(mesh.numFaces),
                 .transformOffset = transformIdx ? *transformIdx : 0u,

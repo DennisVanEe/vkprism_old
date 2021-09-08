@@ -7,12 +7,36 @@
 
 namespace prism {
 
-// For convenience, all shaders names are defined here:
-static constexpr const char* SHADER_FILE_RAYGEN      = "raygen.glsl.comp";
-static constexpr const char* SHADER_FILE_MISS        = "raymiss.glsl.comp";
-static constexpr const char* SHADER_FILE_CLOSEST_HIT = "rayclosesthit.glsl.comp";
+class ShaderFileInfo
+{
+  public:
+    explicit constexpr ShaderFileInfo(uint32_t index, const char* file) : m_file(file), m_index(index) {}
+
+    const char* file() const { return m_file; }
+
+    operator uint32_t() const { return m_index; }
+
+  private:
+    const char* m_file;
+    uint32_t    m_index;
+};
+
+static constexpr auto sRAYGEN      = ShaderFileInfo(0, "raygen.glsl.comp");
+static constexpr auto sMISS        = ShaderFileInfo(1, "raymiss.glsl.comp");
+static constexpr auto sCLOSEST_HIT = ShaderFileInfo(2, "rayclosesthit.glsl.comp");
+
+static constexpr size_t TOTAL_NUM_SHADERS = 3;
 
 vk::UniqueShaderModule loadShaderUnique(const Context& context, std::string_view shaderName);
-vk::ShaderModule       loadShader(const Context& context, std::string_view shader);
+vk::UniqueShaderModule loadShaderUnique(const Context& context, const ShaderFileInfo& shaderInfo)
+{
+    return loadShaderUnique(context, shaderInfo.file());
+}
+
+vk::ShaderModule loadShader(const Context& context, std::string_view shader);
+vk::ShaderModule loadShader(const Context& context, const ShaderFileInfo& shaderInfo)
+{
+    return loadShader(context, shaderInfo.file());
+}
 
 } // namespace prism

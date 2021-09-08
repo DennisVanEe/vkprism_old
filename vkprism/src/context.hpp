@@ -12,6 +12,17 @@
 
 namespace prism {
 
+#define DEVICE_FEATURES_STRUCTURE                                                                                      \
+    vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan12Features,               \
+        vk::PhysicalDeviceAccelerationStructureFeaturesKHR, vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
+
+#define DEVICE_PROPERTIES_STRUCTURE                                                                                    \
+    vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties, vk::PhysicalDeviceVulkan12Properties,         \
+        vk::PhysicalDeviceRayTracingPipelinePropertiesKHR
+
+using PhysicalDeviceFeatures   = vk::StructureChain<DEVICE_FEATURES_STRUCTURE>;
+using PhysicalDeviceProperties = vk::StructureChain<DEVICE_PROPERTIES_STRUCTURE>;
+
 struct ContextParam
 {
     bool enableValidation = false;
@@ -34,22 +45,18 @@ class Context
     const uint32_t            queueFamilyIndex() const { return m_queueInfo.familyIndex; }
     const vk::Queue&          queue() const { return m_queueInfo.queue; }
 
+    const PhysicalDeviceFeatures&   features() const { return m_physDevInfo.features; }
+    const PhysicalDeviceProperties& properties() const { return m_physDevInfo.properties; }
+
   private:
-#define DEVICE_FEATURES_STRUCTURE                                                                                      \
-    vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan12Features,               \
-        vk::PhysicalDeviceAccelerationStructureFeaturesKHR, vk::PhysicalDeviceRayTracingPipelineFeaturesKHR
-
-#define DEVICE_PROPERTIES_STRUCTURE                                                                                    \
-    vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties, vk::PhysicalDeviceVulkan12Properties
-
     struct PhysicalDeviceInfo
     {
         PhysicalDeviceInfo(const vk::PhysicalDevice& physicalDevice, const ContextParam& param);
 
-        vk::PhysicalDevice                              physicalDevice;
-        vk::StructureChain<DEVICE_FEATURES_STRUCTURE>   features;
-        vk::StructureChain<DEVICE_PROPERTIES_STRUCTURE> properties;
-        std::vector<vk::QueueFamilyProperties>          queueFamilyProps;
+        vk::PhysicalDevice                     physicalDevice;
+        PhysicalDeviceFeatures                 features;
+        PhysicalDeviceProperties               properties;
+        std::vector<vk::QueueFamilyProperties> queueFamilyProps;
     };
 
     struct QueueInfo

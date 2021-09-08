@@ -23,8 +23,7 @@ struct PipelineParam
 class Pipelines
 {
   public:
-    Pipelines(const PipelineParam& param, const Context& context, const GpuAllocator& allocator,
-              const Scene& scene);
+    Pipelines(const PipelineParam& param, const Context& context, const GpuAllocator& allocator, const Scene& scene);
 
   private:
     // All of the buffers the pipeline will use (output buffer, ray queues, etc.):
@@ -49,28 +48,35 @@ class Pipelines
         Descriptor<1> raygen;
     };
 
-    struct Pipeline
-    {
-        vk::UniquePipelineLayout layout;
-        vk::UniquePipeline       pipeline;
-    };
-
     //
-    // Any push constants are defined here:
+    // Any data for the RT pipeline:
 
-    struct RTPushConst
-    {};
+    class RTPipeline
+    {
+      public:
+        RTPipeline(const Context& context, const Descriptors& descriptors);
+
+      private:
+        struct PushConst
+        {};
+
+      private:
+
+
+      private:
+        vk::UniquePipelineLayout m_layout;
+        vk::UniquePipeline       m_pipeline;
+    };
 
   private:
     static Buffers     createBuffers(const PipelineParam& param, const GpuAllocator& allocator);
     static Descriptors createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers);
-    static Pipeline    createRTPipeline(const Context& context, const Descriptors& descriptors);
 
   private:
     Buffers     m_buffers;
     Descriptors m_descriptors;
 
-    Pipeline m_rtPipeline;
+    RTPipeline m_rtPipeline;
 };
 
 } // namespace prism

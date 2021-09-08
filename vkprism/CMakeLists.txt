@@ -6,23 +6,22 @@ endif()
 
 # Add source to this project's executable.
 add_executable(vkprism
-    "src/main.cpp"
     "src/main.hpp"
+    "src/main.cpp"
     "src/context.hpp"
     "src/context.cpp"
     "src/util.hpp" 
     "src/util.cpp"
     "src/scene.hpp"
     "src/scene.cpp"
-    "src/scene.hpp"
     "src/transform.hpp"
     "src/transform.cpp"
     "src/allocator.hpp"
     "src/allocator.cpp"
-    "src/pipelines.hpp"
-    "src/pipelines.cpp"
     "src/shaders.hpp"
     "src/shaders.cpp"
+    "src/pipelines.hpp"
+    "src/pipelines.cpp"
     # Any external libraries:
     "extern/vma/vk_mem_alloc.cpp"
     "extern/miniply/miniply.cpp")
@@ -47,7 +46,7 @@ target_link_libraries(vkprism spdlog)
 # We need the SDK with support for ray-tracing:
 add_compile_definitions(
     GLFW_INCLUDE_VULKAN
-    VULKAN_HPP_NO_STRUCT_CONSTRUCTORS # TODO: when the newer SDK is released, replace this
+    VULKAN_HPP_NO_CONSTRUCTORS
     VMA_STATIC_VULKAN_FUNCTIONS=0     # We don't want to statically link against vulkan (we use dynamic for everything)
     VMA_DYNAMIC_VULKAN_FUNCTIONS=0    # We want to manually let VMA to fail an assertion if I'm missing a function
     VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1)
