@@ -11,7 +11,7 @@ namespace prism {
 std::vector<char> loadShaderData(const std::string_view shaderName)
 {
     // TODO: use format:
-    const auto path = "/shaders/" + std::string(shaderName) + ".spv";
+    const auto path = "shaders/" + std::string(shaderName) + ".spv";
 
     std::ifstream shaderFile(path, std::ios::binary);
     if (!shaderFile.is_open()) {
