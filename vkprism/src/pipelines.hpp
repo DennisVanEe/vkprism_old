@@ -20,6 +20,14 @@ struct PipelineParam
     uint32_t outputHeight;
 };
 
+// Function that checks if a pushconstant is valid:
+template<typename T>
+constexpr bool isValidPushConstSize()
+{
+    constexpr size_t size = sizeof(T);
+    return (size <= 128) && (size % 4 == 0);
+}
+
 class Pipelines
 {
   public:
@@ -58,7 +66,10 @@ class Pipelines
 
       private:
         struct PushConst
-        {};
+        {
+            std::array<std::byte, 4> data; // placeholder
+        };
+        static_assert(isValidPushConstSize<PushConst>(), "PushConst is not a valid size.");
 
       private:
         vk::UniquePipelineLayout m_layout;
