@@ -20,7 +20,7 @@ int main(const int argc, const char** const argv)
 
     try {
         const Context      ctx(param);
-        const GpuAllocator allocator(ctx);
+        const GPUAllocator allocator(ctx);
 
         // Create a simple scene:
         const auto scene = [&]() {

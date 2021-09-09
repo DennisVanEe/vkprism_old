@@ -100,7 +100,7 @@ struct SceneParam
 class Scene
 {
   public:
-    Scene(const SceneParam& param, const Context& context, const GpuAllocator& allocator,
+    Scene(const SceneParam& param, const Context& context, const GPUAllocator& gpuAllocator,
           const SceneBuilder& sceneBuilder);
     Scene(const Scene&) = delete;
     Scene(Scene&&)      = default;
@@ -123,16 +123,16 @@ class Scene
     };
 
   private:
-    static MeshGpuData                  transferMeshData(const Context& context, const GpuAllocator& allocator,
+    static MeshGpuData                  transferMeshData(const Context& context, const GPUAllocator& allocator,
                                                          const vk::CommandPool& commandPool, std::span<const SceneBuilder::Mesh> meshes,
                                                          std::span<const Vertex> vertices, std::span<const glm::u32vec3> faces,
                                                          std::span<const vk::TransformMatrixKHR> transforms);
-    static std::vector<AccelStructInfo> createBlas(const Context& context, const GpuAllocator& allocator,
+    static std::vector<AccelStructInfo> createBlas(const Context& context, const GPUAllocator& allocator,
                                                    const vk::CommandPool& commandPool, const MeshGpuData& meshGpuData,
                                                    std::span<const SceneBuilder::Mesh>      meshes,
                                                    std::span<const std::vector<PlacedMesh>> meshGroups,
                                                    bool                                     enableCompaction);
-    static AccelStructInfo              createTlas(const Context& context, const GpuAllocator& allocator,
+    static AccelStructInfo              createTlas(const Context& context, const GPUAllocator& allocator,
                                                    const vk::CommandPool& commandPool, std::span<const Instance> instances,
                                                    std::span<const AccelStructInfo> blases);
 

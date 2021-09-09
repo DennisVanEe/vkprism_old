@@ -28,13 +28,13 @@ static constexpr auto sCLOSEST_HIT = ShaderFileInfo(2, "rayclosesthit.glsl.comp"
 static constexpr size_t TOTAL_NUM_SHADERS = 3;
 
 vk::UniqueShaderModule loadShaderUnique(const Context& context, std::string_view shaderName);
-vk::UniqueShaderModule loadShaderUnique(const Context& context, const ShaderFileInfo& shaderInfo)
+inline vk::UniqueShaderModule loadShaderUnique(const Context& context, const ShaderFileInfo& shaderInfo)
 {
     return loadShaderUnique(context, shaderInfo.file());
 }
 
 vk::ShaderModule loadShader(const Context& context, std::string_view shader);
-vk::ShaderModule loadShader(const Context& context, const ShaderFileInfo& shaderInfo)
+inline vk::ShaderModule loadShader(const Context& context, const ShaderFileInfo& shaderInfo)
 {
     return loadShader(context, shaderInfo.file());
 }

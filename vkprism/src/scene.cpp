@@ -144,9 +144,7 @@ InstanceIndex SceneBuilder::createInstance(const Instance& instance)
 // Scene
 //
 
-constexpr uint64_t FENCE_TIMEOUT = 6e+10; // 1 minute (not sure how long this should be...)
-
-Scene::Scene(const SceneParam& param, const Context& context, const GpuAllocator& allocator,
+Scene::Scene(const SceneParam& param, const Context& context, const GPUAllocator& allocator,
              const SceneBuilder& sceneBuilder)
 {
     const auto commandPool = context.device().createCommandPoolUnique(vk::CommandPoolCreateInfo{
@@ -160,7 +158,7 @@ Scene::Scene(const SceneParam& param, const Context& context, const GpuAllocator
     m_tlas        = createTlas(context, allocator, *commandPool, sceneBuilder.m_instances, m_blases);
 }
 
-Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GpuAllocator& allocator,
+Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GPUAllocator& gpuAllocator,
                                            const vk::CommandPool&                        commandPool,
                                            const std::span<const SceneBuilder::Mesh>     meshes,
                                            const std::span<const Vertex>                 vertices,
@@ -181,73 +179,32 @@ Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GpuAllo
 
     //
     // Transfer mesh vertices and faces:
-    const auto sizeOfVerticesBuff = sizeof(Vertex) * vertices.size();
-    const auto sizeOfFacesBuff    = sizeof(glm::u32vec3) * faces.size();
-
-    const auto stagingVertices =
-        allocator.allocateBuffer(sizeOfVerticesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-    const auto stagingFaces =
-        allocator.allocateBuffer(sizeOfFacesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-
-    // Map the memory and copy it over:
-    std::ranges::copy(vertices, stagingVertices.map<Vertex>());
-    std::ranges::copy(faces, stagingFaces.map<glm::u32vec3>());
-    stagingVertices.unmap();
-    stagingFaces.unmap();
 
     //
     // Allocate buffers on the GPU where we'll send the data:
     const auto blasUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress |
                            vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR;
-    auto gpuVertices = allocator.allocateBuffer(sizeOfVerticesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
-    auto gpuFaces    = allocator.allocateBuffer(sizeOfFacesBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+    auto gpuVertices =
+        gpuAllocator.allocateBuffer(sizeof(Vertex) * vertices.size(), blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+    auto gpuFaces =
+        gpuAllocator.allocateBuffer(sizeof(glm::u32vec3) * faces.size(), blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    //
-    // Record the copy command:
-    commandBuffer->copyBuffer(*stagingVertices, *gpuVertices,
-                              vk::BufferCopy{
-                                  .size = sizeOfVerticesBuff,
-                              });
-    commandBuffer->copyBuffer(*stagingFaces, *gpuFaces,
-                              vk::BufferCopy{
-                                  .size = sizeOfFacesBuff,
-                              });
+    const auto stagingVertices = addCopyToBufferCommand(*commandBuffer, gpuAllocator, gpuVertices, vertices);
+    const auto stagingFaces    = addCopyToBufferCommand(*commandBuffer, gpuAllocator, gpuFaces, faces);
 
     // Transforms are optional, so we check for them, but we need to keep staging transforms on the stack:
     auto [stagingTransforms, gpuTransforms] = [&]() {
         if (!transforms.empty()) {
-            const auto sizeOfTransformBuff = sizeof(vk::TransformMatrixKHR) * transforms.size();
+            auto gpuTransforms     = gpuAllocator.allocateBuffer(sizeof(vk::TransformMatrixKHR) * transforms.size(),
+                                                             blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+            auto stagingTransforms = addCopyToBufferCommand(*commandBuffer, gpuAllocator, gpuTransforms, transforms);
 
-            auto stagingTransforms = allocator.allocateBuffer(
-                sizeOfTransformBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-            std::ranges::copy(transforms, stagingTransforms.map<vk::TransformMatrixKHR>());
-            stagingTransforms.unmap();
-
-            // TODO: I believe we can use the same usage flags, but I'm not sure...
-            auto gpuTransforms = allocator.allocateBuffer(sizeOfTransformBuff, blasUsage, VMA_MEMORY_USAGE_GPU_ONLY);
-            commandBuffer->copyBuffer(*stagingTransforms, *gpuTransforms,
-                                      vk::BufferCopy{
-                                          .size = sizeOfTransformBuff,
-                                      });
             return std::make_tuple(std::move(stagingTransforms), std::move(gpuTransforms));
         }
         return std::make_tuple(UniqueBuffer{}, UniqueBuffer{});
     }();
 
-    commandBuffer->end();
-
-    // Create a fence that we will wait on for all of these operations to finish:
-    const auto fence = context.device().createFenceUnique(vk::FenceCreateInfo{});
-    context.queue().submit(
-        vk::SubmitInfo{
-            .commandBufferCount = 1,
-            .pCommandBuffers    = &*commandBuffer,
-        },
-        *fence);
-
-    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
-        throw std::runtime_error("Fence timed out waiting for mesh data transfer commands.");
-    }
+    submitAndWait(context, *commandBuffer, "sending mesh data to the GPU");
 
     return MeshGpuData{
         .vertices   = std::move(gpuVertices),
@@ -256,7 +213,7 @@ Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GpuAllo
     };
 }
 
-std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, const GpuAllocator& allocator,
+std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, const GPUAllocator& allocator,
                                                       const vk::CommandPool&                         commandPool,
                                                       const MeshGpuData&                             meshGpuData,
                                                       const std::span<const SceneBuilder::Mesh>      meshes,
@@ -424,24 +381,10 @@ std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, co
                               .dstAccessMask = vk::AccessFlagBits::eAccelerationStructureReadKHR},
             {}, {});
 
-        commandBuffer.end();
-
         currGeometryOffset += meshGroup.size();
     }
 
-    // Create a fence that we will wait on for all of these operations to finish:
-    const auto fence = context.device().createFenceUnique({});
-
-    context.queue().submit(
-        vk::SubmitInfo{
-            .commandBufferCount = static_cast<uint32_t>(commandBuffers.size()),
-            .pCommandBuffers    = commandBuffers.data(),
-        },
-        *fence);
-
-    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
-        throw std::runtime_error("Fence timed out when waiting for BLAS construction commands.");
-    }
+    submitAndWait(context, commandBuffers, "BLAS construction");
 
     // If we turned compaction on, then we can move the values over:
     if (enableCompaction) {
@@ -451,7 +394,7 @@ std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, co
     return blases;
 }
 
-Scene::AccelStructInfo Scene::createTlas(const Context& context, const GpuAllocator& allocator,
+Scene::AccelStructInfo Scene::createTlas(const Context& context, const GPUAllocator& gpuAllocator,
                                          const vk::CommandPool& commandPool, const std::span<const Instance> instances,
                                          const std::span<const AccelStructInfo> blases)
 {
@@ -489,24 +432,13 @@ Scene::AccelStructInfo Scene::createTlas(const Context& context, const GpuAlloca
     //
     // Record the command to copy the instance data to the GPU.
 
-    const auto sizeOfInstancesBuff = sizeof(vk::AccelerationStructureInstanceKHR) * instances.size();
-
-    const auto stagingInstances =
-        allocator.allocateBuffer(sizeOfInstancesBuff, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
-
-    std::ranges::copy(vkInstances, stagingInstances.map<vk::AccelerationStructureInstanceKHR>());
-    stagingInstances.unmap();
-
-    const auto gpuInstances = allocator.allocateBuffer(
-        sizeOfInstancesBuff,
+    const auto gpuInstances = gpuAllocator.allocateBuffer(
+        sizeof(vk::AccelerationStructureInstanceKHR) * instances.size(),
         vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst |
             vk::BufferUsageFlagBits::eShaderDeviceAddress,
         VMA_MEMORY_USAGE_GPU_ONLY);
 
-    commandBuffer->copyBuffer(*stagingInstances, *gpuInstances,
-                              vk::BufferCopy{
-                                  .size = sizeOfInstancesBuff,
-                              });
+    const auto stagingInstances = addCopyToBufferCommand(*commandBuffer, gpuAllocator, gpuInstances, vkInstances);
 
     //
     // Make sure the instances data is copied to the GPU before we start constructing the TLAS:
@@ -521,11 +453,13 @@ Scene::AccelStructInfo Scene::createTlas(const Context& context, const GpuAlloca
     //
     // Allocate the required memory for constructing the TLAS:
 
-    const vk::AccelerationStructureGeometryKHR geometry{.geometryType = vk::GeometryTypeKHR::eInstances,
-                                                        .geometry = vk::AccelerationStructureGeometryInstancesDataKHR{
-                                                            .arrayOfPointers = VK_FALSE,
-                                                            .data = gpuInstances.deviceAddress(context.device()),
-                                                        }};
+    const vk::AccelerationStructureGeometryKHR geometry{
+        .geometryType = vk::GeometryTypeKHR::eInstances,
+        .geometry =
+            vk::AccelerationStructureGeometryDataKHR{.instances = vk::AccelerationStructureGeometryInstancesDataKHR{
+                                                         .arrayOfPointers = VK_FALSE,
+                                                         .data = gpuInstances.deviceAddress(context.device()),
+                                                     }}};
 
     vk::AccelerationStructureBuildGeometryInfoKHR buildGeometryInfo{
         .type          = vk::AccelerationStructureTypeKHR::eTopLevel,
@@ -539,16 +473,16 @@ Scene::AccelStructInfo Scene::createTlas(const Context& context, const GpuAlloca
         vk::AccelerationStructureBuildTypeKHR::eDevice, buildGeometryInfo, numInstances);
 
     // Allocate the scratch buffer:
-    const auto scratchBuffer = allocator.allocateBuffer(buildSizeInfo.buildScratchSize,
-                                                        vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                                                            vk::BufferUsageFlagBits::eStorageBuffer,
-                                                        VMA_MEMORY_USAGE_GPU_ONLY);
+    const auto scratchBuffer = gpuAllocator.allocateBuffer(buildSizeInfo.buildScratchSize,
+                                                           vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                                                               vk::BufferUsageFlagBits::eStorageBuffer,
+                                                           VMA_MEMORY_USAGE_GPU_ONLY);
 
     // Allocate the buffer where we will store the tlas:
-    auto tlasBuffer = allocator.allocateBuffer(buildSizeInfo.accelerationStructureSize,
-                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
-                                                   vk::BufferUsageFlagBits::eShaderDeviceAddress,
-                                               VMA_MEMORY_USAGE_GPU_ONLY);
+    auto tlasBuffer = gpuAllocator.allocateBuffer(buildSizeInfo.accelerationStructureSize,
+                                                  vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+                                                      vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                                  VMA_MEMORY_USAGE_GPU_ONLY);
 
     //
     // Record the creation of the TLAS in the command buffer:
@@ -566,23 +500,7 @@ Scene::AccelStructInfo Scene::createTlas(const Context& context, const GpuAlloca
     const vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo{.primitiveCount = numInstances};
     commandBuffer->buildAccelerationStructuresKHR(buildGeometryInfo, &buildRangeInfo);
 
-    commandBuffer->end();
-
-    //
-    // Execute the command buffer and wait for it to finish:
-
-    const auto fence = context.device().createFenceUnique({});
-
-    context.queue().submit(
-        vk::SubmitInfo{
-            .commandBufferCount = 1,
-            .pCommandBuffers    = &*commandBuffer,
-        },
-        *fence);
-
-    if (context.device().waitForFences(*fence, VK_TRUE, FENCE_TIMEOUT) == vk::Result::eTimeout) {
-        throw std::runtime_error("Fence timed out when waiting for TLAS construction command.");
-    }
+    submitAndWait(context, *commandBuffer, "TLAS construction");
 
     return AccelStructInfo{.buffer = std::move(tlasBuffer), .accelStruct = std::move(tlasAccelStruct)};
 }

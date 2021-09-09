@@ -1,5 +1,10 @@
 #pragma once
 
+#include <ranges>
+#include <span>
+
+#include <vulkan/vulkan.hpp>
+
 #include <context.hpp>
 
 namespace prism {
@@ -67,7 +72,7 @@ class UniqueBuffer
     void unmap() const { vmaUnmapMemory(m_allocator, m_allocation); }
 
   private:
-    friend class GpuAllocator;
+    friend class GPUAllocator;
     UniqueBuffer(VkBuffer buffer, VmaAllocation allocation, VmaAllocator allocator) :
         m_buffer(buffer), m_allocation(allocation), m_allocator(allocator)
     {}
@@ -77,12 +82,12 @@ class UniqueBuffer
     VmaAllocator  m_allocator  = nullptr;
 };
 
-class GpuAllocator
+class GPUAllocator
 {
   public:
-    GpuAllocator(const Context& context);
-    GpuAllocator(const GpuAllocator&) = delete;
-    GpuAllocator(GpuAllocator&&)      = delete;
+    GPUAllocator(const Context& context);
+    GPUAllocator(const GPUAllocator&) = delete;
+    GPUAllocator(GPUAllocator&&)      = delete;
 
     UniqueBuffer allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
                                 const VmaAllocationCreateInfo& allocCreateInfo) const;
@@ -95,5 +100,29 @@ class GpuAllocator
 
     UniqueVmaAllocator m_vmaAllocator;
 };
+
+// Adds the copy to buffer command, returning the temporary buffer used so that we can properly deallocate it when
+// necessary.
+template <typename T>
+[[nodiscard]] UniqueBuffer addCopyToBufferCommand(const vk::CommandBuffer& commandBuffer,
+                                                  const GPUAllocator& gpuAllocator, const UniqueBuffer& dstBuffers,
+                                                  const T& srcData)
+{
+    const auto srcSize = srcData.size() * sizeof(T::value_type);
+
+    auto stagingBuffer =
+        gpuAllocator.allocateBuffer(srcSize, vk::BufferUsageFlagBits::eTransferSrc, VMA_MEMORY_USAGE_CPU_ONLY);
+
+    // Copy data to the staging buffer:
+    std::ranges::copy(srcData, stagingBuffer.map<T::value_type>());
+    stagingBuffer.unmap();
+
+    commandBuffer.copyBuffer(*stagingBuffer, *dstBuffers,
+                              vk::BufferCopy{
+                                  .size = srcSize,
+                              });
+
+    return std::move(stagingBuffer);
+}
 
 } // namespace prism

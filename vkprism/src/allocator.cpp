@@ -2,7 +2,7 @@
 
 namespace prism {
 
-GpuAllocator::UniqueVmaAllocator GpuAllocator::createVmaAllocator(const Context& context)
+GPUAllocator::UniqueVmaAllocator GPUAllocator::createVmaAllocator(const Context& context)
 {
     // We want to use the functions loaded from the dynamic dispatcher. I'm not a big fan of this implementation, I need
     // to look for a way to automate this process...
@@ -53,9 +53,9 @@ GpuAllocator::UniqueVmaAllocator GpuAllocator::createVmaAllocator(const Context&
     return UniqueVmaAllocator(allocator);
 }
 
-GpuAllocator::GpuAllocator(const Context& context) : m_vmaAllocator(createVmaAllocator(context)) {}
+GPUAllocator::GPUAllocator(const Context& context) : m_vmaAllocator(createVmaAllocator(context)) {}
 
-UniqueBuffer GpuAllocator::allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
+UniqueBuffer GPUAllocator::allocateBuffer(const vk::BufferCreateInfo&    bufferCreateInfo,
                                           const VmaAllocationCreateInfo& allocCreateInfo) const
 {
     const VkBufferCreateInfo& convBufferCreateInfo = bufferCreateInfo;
@@ -67,7 +67,7 @@ UniqueBuffer GpuAllocator::allocateBuffer(const vk::BufferCreateInfo&    bufferC
     return UniqueBuffer(buffer, allocation, m_vmaAllocator.get());
 }
 
-UniqueBuffer GpuAllocator::allocateBuffer(size_t size, vk::BufferUsageFlags bufferUsage,
+UniqueBuffer GPUAllocator::allocateBuffer(size_t size, vk::BufferUsageFlags bufferUsage,
                                           VmaMemoryUsage memoryUsage) const
 {
     return allocateBuffer(

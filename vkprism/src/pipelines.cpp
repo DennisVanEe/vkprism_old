@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <ranges>
 #include <vector>
 
@@ -9,12 +10,12 @@
 
 namespace prism {
 
-Pipelines::Buffers Pipelines::createBuffers(const PipelineParam& param, const GpuAllocator& allocator)
+Pipelines::Buffers Pipelines::createBuffers(const PipelineParam& param, const GPUAllocator& gpuAllocator)
 {
-    return Buffers{.output = allocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
-                                                      vk::BufferUsageFlagBits::eStorageBuffer |
-                                                          vk::BufferUsageFlagBits::eTransferSrc,
-                                                      VMA_MEMORY_USAGE_GPU_ONLY)};
+    return Buffers{.output = gpuAllocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
+                                                         vk::BufferUsageFlagBits::eStorageBuffer |
+                                                             vk::BufferUsageFlagBits::eTransferSrc,
+                                                         VMA_MEMORY_USAGE_GPU_ONLY)};
 }
 
 template <size_t NumSets>
@@ -102,33 +103,38 @@ Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, cons
     };
 }
 
-Pipelines::Pipelines(const PipelineParam& param, const Context& context, const GpuAllocator& allocator,
+Pipelines::Pipelines(const PipelineParam& param, const Context& context, const GPUAllocator& gpuAllocator,
                      const Scene& scene) :
-    m_buffers(createBuffers(param, allocator)),
+    m_buffers(createBuffers(param, gpuAllocator)),
     m_descriptors(createDescriptors(context, scene, m_buffers)),
-    m_rtPipeline(context, m_descriptors)
+    m_rtPipeline(context, gpuAllocator, m_descriptors)
 {}
 
-Pipelines::RTPipeline::RTPipeline(const Context& context, const Descriptors& descriptors)
+Pipelines::RTPipeline::RTPipeline(const Context& context, const GPUAllocator& gpuAllocator,
+                                  const Descriptors& descriptors)
 {
     //
     // Create the pipeline layout:
+    //
 
-    // For now, each shader will get the same data from the push constant, will fine tune in the future:
-    const vk::PushConstantRange pushConstRange{.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR |
-                                                             vk::ShaderStageFlagBits::eClosestHitKHR |
-                                                             vk::ShaderStageFlagBits::eMissKHR,
-                                               .offset = 0,
-                                               .size   = sizeof(PushConst)};
+    {
+        // For now, each shader will get the same data from the push constant, will fine tune in the future:
+        const vk::PushConstantRange pushConstRange{.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR |
+                                                                 vk::ShaderStageFlagBits::eClosestHitKHR |
+                                                                 vk::ShaderStageFlagBits::eMissKHR,
+                                                   .offset = 0,
+                                                   .size   = sizeof(PushConst)};
 
-    m_layout = context.device().createPipelineLayoutUnique(
-        vk::PipelineLayoutCreateInfo{.setLayoutCount         = 1,
-                                     .pSetLayouts            = &*descriptors.raygen.setLayout,
-                                     .pushConstantRangeCount = 1,
-                                     .pPushConstantRanges    = &pushConstRange});
+        m_layout = context.device().createPipelineLayoutUnique(
+            vk::PipelineLayoutCreateInfo{.setLayoutCount         = 1,
+                                         .pSetLayouts            = &*descriptors.raygen.setLayout,
+                                         .pushConstantRangeCount = 1,
+                                         .pPushConstantRanges    = &pushConstRange});
+    }
 
     //
     // Set the shader stages and the groups up:
+    //
 
     // Load all of the shaders first:
 
@@ -150,31 +156,25 @@ Pipelines::RTPipeline::RTPipeline(const Context& context, const Descriptors& des
         }
     });
 
-    // Now, specify all of the shader groups:
-    enum ShaderGroup : uint32_t
-    {
-        RaygenIdx,
-        MissIdx,
-        HitIdx,
-        CallableIdx,
-    };
-
-    const auto [shaderGroups, numRaygenGroups, numMissGroups, numHitGroups, numCallableGroups] = [&]() {
-        const auto raygenGroups = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+    const auto [shaderGroups, numMissGroups, numHitGroups, numCallableGroups] = [&]() {
+        // According to: https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/#shaderbindingtable
+        // There is always only 1 raygen group:
+        const vk::RayTracingShaderGroupCreateInfoKHR raygenGroups{
             .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
             .generalShader      = sRAYGEN,
             .closestHitShader   = VK_SHADER_UNUSED_KHR,
             .anyHitShader       = VK_SHADER_UNUSED_KHR,
             .intersectionShader = VK_SHADER_UNUSED_KHR,
-        }});
-        const auto missGroups   = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+        };
+
+        const auto missGroups = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
             .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
             .generalShader      = sMISS,
             .closestHitShader   = VK_SHADER_UNUSED_KHR,
             .anyHitShader       = VK_SHADER_UNUSED_KHR,
             .intersectionShader = VK_SHADER_UNUSED_KHR,
         }});
-        const auto hitGroups    = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
+        const auto hitGroups  = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
             .type               = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
             .generalShader      = VK_SHADER_UNUSED_KHR,
             .closestHitShader   = sCLOSEST_HIT,
@@ -185,34 +185,36 @@ Pipelines::RTPipeline::RTPipeline(const Context& context, const Descriptors& des
 
         //
         // Kind of messy, but we essentially combine the shader groups:
+        const uint32_t numMissGroups     = missGroups.size();
+        const uint32_t numHitGroups      = hitGroups.size();
+        const uint32_t numCallableGroups = callableGroups.size();
 
         std::array<vk::RayTracingShaderGroupCreateInfoKHR,
-                   raygenGroups.size() + missGroups.size() + hitGroups.size() + callableGroups.size()>
+                   1 + missGroups.size() + hitGroups.size() + callableGroups.size()>
             shaderGroups;
 
-        auto shaderGroupsItr = shaderGroups.begin();
-        std::ranges::copy(raygenGroups, shaderGroupsItr);
-        shaderGroupsItr += raygenGroups.size();
+        shaderGroups[0] = raygenGroups;
+
+        auto shaderGroupsItr = shaderGroups.begin() + 1;
         std::ranges::copy(missGroups, shaderGroupsItr);
         shaderGroupsItr += missGroups.size();
         std::ranges::copy(hitGroups, shaderGroupsItr);
         shaderGroupsItr += hitGroups.size();
         std::ranges::copy(callableGroups, shaderGroupsItr);
 
-        return std::make_tuple(shaderGroups, raygenGroups.size(), missGroups.size(), hitGroups.size(),
-                               callableGroups.size());
+        return std::make_tuple(shaderGroups, numMissGroups, numHitGroups, numCallableGroups);
     }();
 
-    const vk::RayTracingPipelineCreateInfoKHR pipelineCreateInfo{
-        .stageCount                   = static_cast<uint32_t>(shaderStages.size()),
-        .pStages                      = shaderStages.data(),
-        .groupCount                   = static_cast<uint32_t>(shaderGroups.size()),
-        .pGroups                      = shaderGroups.data(),
-        .maxPipelineRayRecursionDepth = 1, // No recursion will be used, instead queues and whatnot...
-        .layout                       = *m_layout,
-    };
-
     m_pipeline = [&]() {
+        const vk::RayTracingPipelineCreateInfoKHR pipelineCreateInfo{
+            .stageCount                   = static_cast<uint32_t>(shaderStages.size()),
+            .pStages                      = shaderStages.data(),
+            .groupCount                   = static_cast<uint32_t>(shaderGroups.size()),
+            .pGroups                      = shaderGroups.data(),
+            .maxPipelineRayRecursionDepth = 1, // No recursion will be used, instead queues and whatnot...
+            .layout                       = *m_layout,
+        };
+
         auto result = context.device().createRayTracingPipelinesKHRUnique({}, {}, pipelineCreateInfo);
         switch (result.result) {
         case vk::Result::eSuccess:
@@ -226,11 +228,89 @@ Pipelines::RTPipeline::RTPipeline(const Context& context, const Descriptors& des
 
     //
     // Create the shader binding table:
+    //
 
     const auto& rtPipelineProps = context.properties().get<vk::PhysicalDeviceRayTracingPipelinePropertiesKHR>();
-    const auto  alignedGroupSize =
-        alignUp(rtPipelineProps.shaderGroupHandleSize, rtPipelineProps.shaderGroupBaseAlignment);
-    const auto sbtSize = static_cast<uint32_t>(shaderGroups.size()) * alignedGroupSize;
+
+    // The aligned handle size (note this may change for each class of shader groups if we embed our own data):
+    const auto handleSize        = rtPipelineProps.shaderGroupHandleSize;
+    const auto handleSizeAligned = alignUp(handleSize, rtPipelineProps.shaderGroupHandleAlignment);
+    const auto raygenHandleSize =
+        alignUp(handleSizeAligned, rtPipelineProps.shaderGroupBaseAlignment); // only 1 raygen shader...
+
+    //
+    // Set all of the shader ranges. Note that the first handle of each collection of handles (raygen, miss, hit, etc.)
+    // has to be aligned to shaderGroupBaseAlignment, while each handle itself has to be aligned to
+    // shaderGroupHandleAlignment.
+
+    m_raygenAddrRegion = vk::StridedDeviceAddressRegionKHR{.stride = raygenHandleSize, .size = raygenHandleSize};
+    m_missAddrRegion   = vk::StridedDeviceAddressRegionKHR{
+        .stride = handleSizeAligned,
+        .size   = alignUp(handleSizeAligned * numMissGroups, rtPipelineProps.shaderGroupBaseAlignment),
+    };
+    m_hitAddrRegion = vk::StridedDeviceAddressRegionKHR{
+        .stride = handleSizeAligned,
+        .size   = alignUp(handleSizeAligned * numHitGroups, rtPipelineProps.shaderGroupBaseAlignment),
+    };
+    m_callableAddrRegion = vk::StridedDeviceAddressRegionKHR{
+        .stride = handleSizeAligned,
+        .size   = alignUp(handleSizeAligned * numCallableGroups, rtPipelineProps.shaderGroupBaseAlignment),
+    };
+
+    //
+    // Allocate memory for the SBT:
+
+    const auto sbtSize =
+        m_raygenAddrRegion.size + m_missAddrRegion.size + m_hitAddrRegion.size + m_callableAddrRegion.size;
+    m_sbt = gpuAllocator.allocateBuffer(sbtSize,
+                                        vk::BufferUsageFlagBits::eTransferDst |
+                                            vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                                            vk::BufferUsageFlagBits::eShaderBindingTableKHR,
+                                        VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    // Assign the device addresses:
+    const auto sbtAddress = m_sbt.deviceAddress(context.device());
+
+    m_raygenAddrRegion.deviceAddress   = sbtAddress;
+    m_missAddrRegion.deviceAddress     = sbtAddress + m_raygenAddrRegion.size;
+    m_hitAddrRegion.deviceAddress      = sbtAddress + m_raygenAddrRegion.size + m_hitAddrRegion.size;
+    m_callableAddrRegion.deviceAddress = 0; // no callables yet...
+
+    //
+    // Copy the the vulkan handles to our SBT:
+    {
+        const auto shaderHandles = context.device().getRayTracingShaderGroupHandlesKHR<std::byte>(
+            *m_pipeline, 0, shaderGroups.size(), shaderGroups.size() * handleSize);
+        const auto shaderHandlesSpan = std::span(shaderHandles);
+
+        auto*      sbtData         = m_sbt.map<std::byte>();
+        const auto copySBTHandleFn = [&](size_t sbtStartAddr, size_t sbtStride, size_t handleStartIndex,
+                                         size_t handleCount) {
+            for (size_t i = 0; i < handleCount; ++i) {
+                std::ranges::copy(shaderHandlesSpan.subspan(handleStartIndex + i * handleSize, handleSize),
+                                  sbtData + sbtStartAddr + (i * sbtStride));
+            }
+        };
+
+        size_t sbtStartAddr     = 0;
+        size_t handleStartIndex = 0;
+
+        copySBTHandleFn(sbtStartAddr, m_raygenAddrRegion.stride, handleStartIndex, 1); // raygen
+
+        sbtStartAddr += m_raygenAddrRegion.size;
+        handleStartIndex += 1;
+        copySBTHandleFn(sbtStartAddr, m_missAddrRegion.stride, handleStartIndex, numMissGroups); // miss
+
+        sbtStartAddr += m_missAddrRegion.size;
+        handleStartIndex += numMissGroups;
+        copySBTHandleFn(sbtStartAddr, m_hitAddrRegion.stride, handleStartIndex, numHitGroups); // hit
+
+        sbtStartAddr += m_hitAddrRegion.size;
+        handleStartIndex += numHitGroups;
+        copySBTHandleFn(sbtStartAddr, m_callableAddrRegion.stride, handleStartIndex, numCallableGroups); // callable
+
+        m_sbt.unmap();
+    }
 }
 
 } // namespace prism

@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <source_location>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -68,7 +70,7 @@ class Defer
 };
 
 // Simple function that rounds up to the nearest value with the specified alignment:
-template<typename T>
+template <typename T>
 T alignUp(T size, T alignment)
 {
     return (size + (alignment - 1)) & ~(alignment - 1);

@@ -23,7 +23,7 @@ struct PipelineParam
 class Pipelines
 {
   public:
-    Pipelines(const PipelineParam& param, const Context& context, const GpuAllocator& allocator, const Scene& scene);
+    Pipelines(const PipelineParam& param, const Context& context, const GPUAllocator& gpuAllocator, const Scene& scene);
 
   private:
     // All of the buffers the pipeline will use (output buffer, ray queues, etc.):
@@ -54,22 +54,26 @@ class Pipelines
     class RTPipeline
     {
       public:
-        RTPipeline(const Context& context, const Descriptors& descriptors);
+        RTPipeline(const Context& context, const GPUAllocator& gpuAllocator, const Descriptors& descriptors);
 
       private:
         struct PushConst
         {};
 
       private:
-
-
-      private:
         vk::UniquePipelineLayout m_layout;
         vk::UniquePipeline       m_pipeline;
+
+        vk::StridedDeviceAddressRegionKHR m_raygenAddrRegion;
+        vk::StridedDeviceAddressRegionKHR m_missAddrRegion;
+        vk::StridedDeviceAddressRegionKHR m_hitAddrRegion;
+        vk::StridedDeviceAddressRegionKHR m_callableAddrRegion;
+
+        UniqueBuffer m_sbt;
     };
 
   private:
-    static Buffers     createBuffers(const PipelineParam& param, const GpuAllocator& allocator);
+    static Buffers     createBuffers(const PipelineParam& param, const GPUAllocator& gpuAllocator);
     static Descriptors createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers);
 
   private:

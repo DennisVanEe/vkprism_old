@@ -95,4 +95,10 @@ class Context
     QueueInfo m_queueInfo;
 };
 
+// The default fence timeout of 1 minute (not sure how long this should be...)
+constexpr uint64_t FENCE_TIMEOUT = 6e+10;
+
+void submitAndWait(const Context& context, vk::ArrayProxy<const vk::CommandBuffer> commandBuffers,
+                   std::string_view description = {}, uint64_t timeout = FENCE_TIMEOUT);
+
 } // namespace prism

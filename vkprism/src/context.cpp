@@ -227,4 +227,31 @@ Context::Context(const ContextParam& param) :
     m_queueInfo(createQueueInfo(*m_device, m_physDevInfo))
 {}
 
+void submitAndWait(const Context& context, vk::ArrayProxy<const vk::CommandBuffer> commandBuffers,
+                   std::string_view description, uint64_t timeout)
+{
+
+    for (const auto& commandBuffer : commandBuffers) {
+        commandBuffer.end();
+    }
+
+    // Create a fence that we will wait on for all of these operations to finish:
+    const auto fence = context.device().createFenceUnique(vk::FenceCreateInfo{});
+    context.queue().submit(
+        vk::SubmitInfo{
+            .commandBufferCount = commandBuffers.size(),
+            .pCommandBuffers    = commandBuffers.data(),
+        },
+        *fence);
+
+    if (context.device().waitForFences(*fence, VK_TRUE, timeout) == vk::Result::eTimeout) {
+        std::stringstream ss;
+        ss << "Fence timed out waiting on command submission";
+        if (!description.empty()) {
+            ss << " for: " << description << ".";
+        }
+        throw std::runtime_error(ss.str());
+    }
+}
+
 } // namespace prism
