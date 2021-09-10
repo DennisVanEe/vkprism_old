@@ -1,3 +1,6 @@
+// This manages all of the pipelines that may be used in the renderer.
+// TODO: I feel as if there's a better way to organize this, figure something better out when the time comes.
+
 #pragma once
 
 #include <array>
@@ -11,9 +14,6 @@
 
 namespace prism {
 
-// Not sure where this is defined, but here we will place it:
-constexpr size_t MIN_PUSH_CONST_SIZE = 128;
-
 struct PipelineParam
 {
     uint32_t outputWidth;
@@ -21,7 +21,7 @@ struct PipelineParam
 };
 
 // Function that checks if a pushconstant is valid:
-template<typename T>
+template <typename T>
 constexpr bool isValidPushConstSize()
 {
     constexpr size_t size = sizeof(T);
@@ -64,6 +64,8 @@ class Pipelines
       public:
         RTPipeline(const Context& context, const GPUAllocator& gpuAllocator, const Descriptors& descriptors);
 
+        void addToCommandBuffer(const vk::CommandBuffer& commandBuffer, const PipelineParam& param) const;
+
       private:
         struct PushConst
         {
@@ -72,15 +74,19 @@ class Pipelines
         static_assert(isValidPushConstSize<PushConst>(), "PushConst is not a valid size.");
 
       private:
+        // The pipeline itself:
         vk::UniquePipelineLayout m_layout;
         vk::UniquePipeline       m_pipeline;
 
+        // The SBT and the respective regions:
         vk::StridedDeviceAddressRegionKHR m_raygenAddrRegion;
         vk::StridedDeviceAddressRegionKHR m_missAddrRegion;
         vk::StridedDeviceAddressRegionKHR m_hitAddrRegion;
         vk::StridedDeviceAddressRegionKHR m_callableAddrRegion;
+        UniqueBuffer                      m_sbt;
 
-        UniqueBuffer m_sbt;
+        // A vector of all of the descriptors that the pipeline will be using:
+        std::vector<vk::DescriptorSet> m_descriptorSets;
     };
 
   private:

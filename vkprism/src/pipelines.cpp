@@ -117,19 +117,23 @@ Pipelines::RTPipeline::RTPipeline(const Context& context, const GPUAllocator& gp
     // Create the pipeline layout:
     //
 
+    m_descriptorSets.emplace_back(descriptors.raygen.set);
+
     {
-        // For now, each shader will get the same data from the push constant, will fine tune in the future:
-        const vk::PushConstantRange pushConstRange{.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR |
-                                                                 vk::ShaderStageFlagBits::eClosestHitKHR |
-                                                                 vk::ShaderStageFlagBits::eMissKHR,
-                                                   .offset = 0,
-                                                   .size   = sizeof(PushConst)};
+        const auto descriptorSetLayouts = std::to_array({
+            *descriptors.raygen.setLayout,
+        });
+        const auto pushConstantRanges   = std::to_array({vk::PushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR |
+                          vk::ShaderStageFlagBits::eMissKHR,
+            .offset = 0,
+            .size   = sizeof(PushConst)}});
 
         m_layout = context.device().createPipelineLayoutUnique(
-            vk::PipelineLayoutCreateInfo{.setLayoutCount         = 1,
-                                         .pSetLayouts            = &*descriptors.raygen.setLayout,
-                                         .pushConstantRangeCount = 1,
-                                         .pPushConstantRanges    = &pushConstRange});
+            vk::PipelineLayoutCreateInfo{.setLayoutCount         = descriptorSetLayouts.size(),
+                                         .pSetLayouts            = descriptorSetLayouts.data(),
+                                         .pushConstantRangeCount = pushConstantRanges.size(),
+                                         .pPushConstantRanges    = pushConstantRanges.data()});
     }
 
     //
@@ -311,6 +315,15 @@ Pipelines::RTPipeline::RTPipeline(const Context& context, const GPUAllocator& gp
 
         m_sbt.unmap();
     }
+}
+
+void Pipelines::RTPipeline::addToCommandBuffer(const vk::CommandBuffer& commandBuffer, const PipelineParam& param) const
+{
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, *m_pipeline);
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, *m_layout, 0, m_descriptorSets, {});
+    // commandBuffer.pushConstants(*m_layout, ...) <- add when appropriate
+    commandBuffer.traceRaysKHR(m_raygenAddrRegion, m_missAddrRegion, m_hitAddrRegion, m_callableAddrRegion,
+                               param.outputWidth, param.outputHeight, 1);
 }
 
 } // namespace prism
