@@ -1,0 +1,9 @@
+This file contains information about the descriptors used in the different pipelines we have.
+
+- layout(set = 0, binding = 0), this one will contain all of the output buffers
+	- This should probably be at different binding points...
+- layout(set = 1, binding = 0), this one will contain just the AccelStruct
+- layout(set = 1, binding = 1), this one will contain scene description (mesh data, texture data, etc.)
+- layout(set = 2, binding = 0), this one will contain all of the information used by the camera (matrices and whatnot...)
+- layout(set = 3, binding = 0), this one will contain all of the different queues used by the renderer (including the mutices and whatnot...)
+	- This should probably be at different binding points...

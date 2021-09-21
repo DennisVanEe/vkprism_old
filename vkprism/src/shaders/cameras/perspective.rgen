@@ -1,0 +1,29 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_GOOGLE_include_directive : enable
+
+// Get the camera types:
+#define CAMERA_TYPES
+#include "camera.glsl"
+
+#include "../shared.h"
+
+// We will guarantee that this descriptor set defines the properties of the camera:
+layout(set = 1, binding = 0) uniform PerspectiveCamera g_perspectiveCamera;
+
+Ray camera_genRay(CameraSample cameraSample)
+{
+	// Take a raster point (pFilm) and transform to camera space using projection matrix:
+	vec4 pCamera = g_perspectiveCamera.rasterToCamera * vec4(cameraSample.pFilm, 0.0, 1.0);
+	pCamera *= (1.0 / pCamera.w); // apply the perspective division
+
+	return Ray(
+		g_perspectiveCamera.cameraToWorld * vec4(0.0, 0.0, 0.0, 1.0),
+		g_perspectiveCamera.cameraToWorld * vec4(normalize(pCamera.xyz), 0.0),
+		cameraSample.time
+	);
+}
+
+// The function that shoots the rays:
+#define CAMERA_MAIN
+#include "camera.glsl"

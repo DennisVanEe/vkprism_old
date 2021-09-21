@@ -1,9 +1,5 @@
 ﻿project(prism VERSION 1.0.0 LANGUAGES CXX)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    add_compile_options("/std:c++20")
-endif()
-
 # Add source to this project's executable.
 add_executable(vkprism
     "src/main.hpp"
@@ -24,14 +20,12 @@ add_executable(vkprism
     "src/pipelines.cpp"
     # Any external libraries:
     "extern/vma/vk_mem_alloc.cpp"
-    "extern/miniply/miniply.cpp")
+    "extern/miniply/miniply.cpp" "src/camera.hpp" "src/camera.cpp" "src/sampler.hpp"  "src/shaders/shared.h"  )
 
-if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set_target_properties(vkprism
-        PROPERTIES
-        CXX_STANDARD 20
-        CXX_STANDARD_REQUIRED YES)
-endif()
+set_target_properties(vkprism
+    PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED YES)
 
 target_include_directories(vkprism PUBLIC "${PROJECT_BINARY_DIR}/include/") # To allow us to include the configure.hpp file
 target_include_directories(vkprism PUBLIC "src/")
