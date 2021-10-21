@@ -12,15 +12,41 @@ namespace prism {
 
 Pipelines::Buffers Pipelines::createBuffers(const PipelineParam& param, const GPUAllocator& gpuAllocator)
 {
-    return Buffers{.output = gpuAllocator.allocateBuffer(param.outputWidth * param.outputHeight * sizeof(glm::vec3),
-                                                         vk::BufferUsageFlagBits::eStorageBuffer |
-                                                             vk::BufferUsageFlagBits::eTransferSrc,
-                                                         VMA_MEMORY_USAGE_GPU_ONLY)};
+    return Buffers{.beautyOutput = gpuAllocator.allocateBuffer(
+                       param.outputWidth * param.outputHeight * sizeof(glm::vec3),
+                       vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
+                       VMA_MEMORY_USAGE_GPU_ONLY)};
 }
 
 Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers)
 {
-    auto raygen = [&]() {
+    // This contains the output buffers (final color image, other AOVs, etc.):
+    auto outputBuffers = [&]() {
+        Descriptor<1> descriptor(
+            context,
+            std::to_array({// Beauty output buffer:
+                           vk::DescriptorSetLayoutBinding{.binding         = 1,
+                                                          .descriptorType  = vk::DescriptorType::eStorageBuffer,
+                                                          .descriptorCount = 1,
+                                                          .stageFlags      = vk::ShaderStageFlagBits::eRaygenKHR}}));
+
+        const vk::DescriptorBufferInfo beautyOutputBufferInfo{.buffer = *buffers.beautyOutput, .range = VK_WHOLE_SIZE};
+        const vk::WriteDescriptorSet   beautyOutputWrite{
+            .dstSet          = descriptor.sets[0],
+            .dstBinding      = 0, // binding 0
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType  = vk::DescriptorType::eStorageBuffer,
+            .pBufferInfo     = &beautyOutputBufferInfo,
+        };
+
+        context.device().updateDescriptorSets(beautyOutputWrite, {});
+
+        return descriptor;
+    }();
+
+    // The scene info descriptor contains the TLAS, scene geometry, and scene material properties (to be added later):
+    auto sceneInfo = [&]() {
         Descriptor<1> descriptor(
             context, std::to_array({
                          // TLAS:
@@ -47,23 +73,14 @@ Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, cons
             },
         };
 
-        const vk::DescriptorBufferInfo outputBufferInfo{.buffer = *buffers.output, .range = VK_WHOLE_SIZE};
-        const vk::WriteDescriptorSet   outputWrite{
-            .dstSet          = descriptor.sets[0],
-            .dstBinding      = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType  = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo     = &outputBufferInfo,
-        };
-
-        context.device().updateDescriptorSets({tlasWrite.get<vk::WriteDescriptorSet>(), outputWrite}, {});
+        context.device().updateDescriptorSets(tlasWrite.get<vk::WriteDescriptorSet>(), {});
 
         return descriptor;
     }();
 
     return Descriptors{
-        .raygen = std::move(raygen),
+        .outputBuffers = std::move(outputBuffers),
+        .sceneInfo     = std::move(sceneInfo),
     };
 }
 

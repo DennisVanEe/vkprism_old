@@ -35,11 +35,14 @@ constexpr bool isValidPushConstSize()
     return (size <= 128) && (size % 4 == 0);
 }
 
+// The pipelines class stores all of the different pipelines that are going to be needed, including any descriptors that
+// they may need.
 class Pipelines
 {
   public:
     Pipelines(const PipelineParam& param, const Context& context, const GPUAllocator& gpuAllocator, const Scene& scene);
 
+    // Binds the ray-tracing pipeline (when performing ray-tracing operations):
     void addBindRTPipelineCmd(const vk::CommandBuffer& commandBuffer, const RTPipelineParam& param) const;
 
   private:
@@ -87,18 +90,18 @@ class Pipelines
         std::array<vk::DescriptorSet, NumSets> sets;
     };
 
-    // All of the buffers the pipeline will use (output buffer, ray queues, etc.):
+    // All of the buffers the pipeline will use (color output buffer, ray queues, etc.):
     struct Buffers
     {
-        UniqueBuffer output;
+        UniqueBuffer beautyOutput;
     };
 
     struct Descriptors
     {
         Descriptor<1> outputBuffers;
         Descriptor<1> sceneInfo;
-        Descriptor<1> cameraInfo;
-        Descriptor<1> queues; // contains all of the different queues and whatnot...
+        // Descriptor<1> cameraInfo;
+        // Descriptor<1> queues; // contains all of the different queues and whatnot...
     };
 
     //

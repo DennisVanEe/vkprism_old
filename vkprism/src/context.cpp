@@ -69,7 +69,6 @@ constexpr vk::DebugUtilsMessengerCreateInfoEXT DEBUG_UTILS_MSGR_CREATE_INFO{
 std::vector<const char*> Context::getRequiredDeviceExtensions(const ContextParam& param)
 {
     // All of the device extensions needed for ray-tracing acceleration:
-    // return {};
     return {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME};
 }
@@ -230,7 +229,6 @@ Context::Context(const ContextParam& param) :
 void submitAndWait(const Context& context, vk::ArrayProxy<const vk::CommandBuffer> commandBuffers,
                    std::string_view description, uint64_t timeout)
 {
-
     for (const auto& commandBuffer : commandBuffers) {
         commandBuffer.end();
     }

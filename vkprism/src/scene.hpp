@@ -139,7 +139,7 @@ class Scene
   private:
     MeshGpuData m_meshGpuData;
 
-    std::vector<AccelStructInfo> m_blases;
+    std::vector<AccelStructInfo> m_blases; // All of the instances of an object
     AccelStructInfo              m_tlas;
 };
 
