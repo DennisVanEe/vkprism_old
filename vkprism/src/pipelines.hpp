@@ -45,6 +45,11 @@ class Pipelines
     // Binds the ray-tracing pipeline (when performing ray-tracing operations):
     void addBindRTPipelineCmd(const vk::CommandBuffer& commandBuffer, const RTPipelineParam& param) const;
 
+    const vk::Buffer& getBeautyBuffer() const
+    {
+        return *m_buffers.beautyOutput;
+    }
+
   private:
     // Defines a descriptor when given a set of bindings. Note that we only support 1 descriptor set at this moment.
     // Until more are needed, this just keeps things simple.

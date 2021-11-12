@@ -147,9 +147,11 @@ InstanceIndex SceneBuilder::createInstance(const Instance& instance)
 Scene::Scene(const SceneParam& param, const Context& context, const GPUAllocator& allocator,
              const SceneBuilder& sceneBuilder)
 {
-    const auto commandPool = context.device().createCommandPoolUnique(vk::CommandPoolCreateInfo{
-        .flags            = vk::CommandPoolCreateFlagBits::eTransient, // All of the command buffers will be short lived
-        .queueFamilyIndex = context.queueFamilyIndex()});
+    const auto commandPool = context.device().createCommandPoolUnique(
+        vk::CommandPoolCreateInfo{
+            .flags            = vk::CommandPoolCreateFlagBits::eTransient, // All of the command buffers will be short lived
+            .queueFamilyIndex = context.queueFamilyIndex()
+        });
 
     m_meshGpuData = transferMeshData(context, allocator, *commandPool, sceneBuilder.m_meshes, sceneBuilder.m_vertices,
                                      sceneBuilder.m_faces, sceneBuilder.m_transforms);
@@ -213,12 +215,13 @@ Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GPUAllo
     };
 }
 
-std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, const GPUAllocator& allocator,
-                                                      const vk::CommandPool&                         commandPool,
-                                                      const MeshGpuData&                             meshGpuData,
-                                                      const std::span<const SceneBuilder::Mesh>      meshes,
-                                                      const std::span<const std::vector<PlacedMesh>> meshGroups,
-                                                      const bool                                     enableCompaction)
+std::vector<Scene::AccelStructInfo> Scene::createBlas(
+    const Context& context, const GPUAllocator&    allocator,
+    const vk::CommandPool&                         commandPool,
+    const MeshGpuData&                             meshGpuData,
+    const std::span<const SceneBuilder::Mesh>      meshes,
+    const std::span<const std::vector<PlacedMesh>> meshGroups,
+    const bool                                     enableCompaction)
 {
     const auto gpuVerticesAddr = meshGpuData.vertices.deviceAddress(context.device());
     const auto gpuFacesAddr    = meshGpuData.faces.deviceAddress(context.device());
