@@ -12,28 +12,36 @@ namespace prism {
 
 Pipelines::Buffers Pipelines::createBuffers(const PipelineParam& param, const GPUAllocator& gpuAllocator)
 {
-    return Buffers{.beautyOutput = gpuAllocator.allocateBuffer(
-                       param.outputWidth * param.outputHeight * sizeof(glm::vec3),
-                       vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
-                       VMA_MEMORY_USAGE_GPU_ONLY)};
+    return Buffers{
+        .beautyOutput = gpuAllocator.allocateBuffer(
+            param.outputWidth * param.outputHeight * sizeof(glm::vec3),
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc,
+            VMA_MEMORY_USAGE_GPU_ONLY)
+    };
 }
 
 Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, const Scene& scene, const Buffers& buffers)
 {
     // This contains the output buffers (final color image, other AOVs, etc.):
     auto outputBuffers = [&]() {
-        Descriptor<1> descriptor(
+        Descriptor descriptor(
             context,
-            std::to_array({// Beauty output buffer:
-                           vk::DescriptorSetLayoutBinding{.binding         = 1,
-                                                          .descriptorType  = vk::DescriptorType::eStorageBuffer,
-                                                          .descriptorCount = 1,
-                                                          .stageFlags      = vk::ShaderStageFlagBits::eRaygenKHR}}));
+            std::to_array({
+                // Beauty output buffer:
+                vk::DescriptorSetLayoutBinding{
+                    .binding         = 0,
+                    .descriptorType  = vk::DescriptorType::eStorageBuffer,
+                    .descriptorCount = 1,
+                    .stageFlags      = vk::ShaderStageFlagBits::eRaygenKHR}}));
 
-        const vk::DescriptorBufferInfo beautyOutputBufferInfo{.buffer = *buffers.beautyOutput, .range = VK_WHOLE_SIZE};
-        const vk::WriteDescriptorSet   beautyOutputWrite{
-            .dstSet          = descriptor.sets[0],
-            .dstBinding      = 0, // binding 0
+        const vk::DescriptorBufferInfo beautyOutputBufferInfo{
+            .buffer = *buffers.beautyOutput,
+            .range = VK_WHOLE_SIZE
+        };
+
+        const vk::WriteDescriptorSet beautyOutputWrite{
+            .dstSet          = descriptor.set,
+            .dstBinding      = 0,
             .dstArrayElement = 0,
             .descriptorCount = 1,
             .descriptorType  = vk::DescriptorType::eStorageBuffer,
@@ -47,22 +55,16 @@ Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, cons
 
     // The scene info descriptor contains the TLAS, scene geometry, and scene material properties (to be added later):
     auto sceneInfo = [&]() {
-        Descriptor<1> descriptor(
-            context, std::to_array({
-                         // TLAS:
-                         vk::DescriptorSetLayoutBinding{.binding        = 0,
-                                                        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
-                                                        .descriptorCount = 1,
-                                                        .stageFlags      = vk::ShaderStageFlagBits::eRaygenKHR},
-                         // Output Buffer:
-                         vk::DescriptorSetLayoutBinding{.binding         = 1,
-                                                        .descriptorType  = vk::DescriptorType::eStorageBuffer,
-                                                        .descriptorCount = 1,
-                                                        .stageFlags      = vk::ShaderStageFlagBits::eRaygenKHR},
-                     }));
+        Descriptor descriptor(context,
+                              std::to_array({// TLAS:
+                                             vk::DescriptorSetLayoutBinding{
+                                                 .binding         = 0,
+                                                 .descriptorType  = vk::DescriptorType::eAccelerationStructureKHR,
+                                                 .descriptorCount = 1,
+                                                 .stageFlags      = vk::ShaderStageFlagBits::eRaygenKHR}}));
 
         const vk::StructureChain<vk::WriteDescriptorSet, vk::WriteDescriptorSetAccelerationStructureKHR> tlasWrite{
-            vk::WriteDescriptorSet{.dstSet          = descriptor.sets[0],
+            vk::WriteDescriptorSet{.dstSet          = descriptor.set,
                                    .dstBinding      = 0,
                                    .dstArrayElement = 0,
                                    .descriptorCount = 1,
@@ -84,30 +86,33 @@ Pipelines::Descriptors Pipelines::createDescriptors(const Context& context, cons
     };
 }
 
-Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const GPUAllocator& gpuAllocator,
-                                                  const Descriptors& descriptors)
+Pipelines::RTPipeline Pipelines::createRTPipeline(
+    const Context&      context,
+    const GPUAllocator& gpuAllocator,
+    const Descriptors&  descriptors)
 {
     //
     // Create the pipeline layout:
     //
 
-    const auto descriptorSets = std::to_array({descriptors.raygen.sets[0]});
+    // For now, the RT pipeline will have both the TLAS and the output buffer.
+    // In reality it would be the TLAS and any queues.
+    const auto descriptorSets = std::to_array({descriptors.sceneInfo.set, descriptors.outputBuffers.set});
 
     auto pipelineLayout = [&]() {
-        const auto descriptorSetLayouts = std::to_array({
-            *descriptors.raygen.setLayout,
-        });
-        const auto pushConstantRanges   = std::to_array({vk::PushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR |
-                          vk::ShaderStageFlagBits::eMissKHR,
-            .offset = 0,
-            .size   = sizeof(RTPipeline::PushConst)}});
+        const auto descriptorSetLayouts =
+            std::to_array({
+                *descriptors.sceneInfo.setLayout,
+                *descriptors.outputBuffers.setLayout
+            });
 
         return context.device().createPipelineLayoutUnique(
-            vk::PipelineLayoutCreateInfo{.setLayoutCount         = descriptorSetLayouts.size(),
-                                         .pSetLayouts            = descriptorSetLayouts.data(),
-                                         .pushConstantRangeCount = pushConstantRanges.size(),
-                                         .pPushConstantRanges    = pushConstantRanges.data()});
+            vk::PipelineLayoutCreateInfo{
+                .setLayoutCount         = descriptorSetLayouts.size(),
+                .pSetLayouts            = descriptorSetLayouts.data(),
+                .pushConstantRangeCount = 0, // no push constants for now
+                .pPushConstantRanges    = nullptr
+            });
     }();
 
     //
@@ -119,15 +124,23 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
     const auto shaderStages = [&]() {
         std::array<vk::PipelineShaderStageCreateInfo, TOTAL_NUM_SHADERS> shaderStages;
         shaderStages[sRAYGEN] = vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eRaygenKHR, .module = loadShader(context, sRAYGEN), .pName = "main"};
+            .stage  = vk::ShaderStageFlagBits::eRaygenKHR,
+            .module = loadShader(context, sRAYGEN),
+            .pName  = SHADER_ENTRY
+        };
         shaderStages[sMISS] = vk::PipelineShaderStageCreateInfo{
-            .stage = vk::ShaderStageFlagBits::eMissKHR, .module = loadShader(context, sMISS), .pName = "main"};
-        shaderStages[sCLOSEST_HIT] = vk::PipelineShaderStageCreateInfo{.stage = vk::ShaderStageFlagBits::eClosestHitKHR,
-                                                                       .module = loadShader(context, sCLOSEST_HIT),
-                                                                       .pName  = "main"};
+            .stage = vk::ShaderStageFlagBits::eMissKHR,
+            .module = loadShader(context, sMISS),
+            .pName = SHADER_ENTRY
+        };
+        shaderStages[sCLOSEST_HIT] = vk::PipelineShaderStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eClosestHitKHR,
+            .module = loadShader(context, sCLOSEST_HIT),
+            .pName  = SHADER_ENTRY
+        };
         return shaderStages;
     }();
-    // Make sure to delete them at the end:
+    // Make sure to delete the shader stages when we leave the function:
     Defer shaderStageCleanup([&]() {
         for (const auto& stage : shaderStages) {
             context.device().destroyShaderModule(stage.module);
@@ -135,9 +148,7 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
     });
 
     const auto [shaderGroups, numMissGroups, numHitGroups, numCallableGroups] = [&]() {
-        // According to: https://nvpro-samples.github.io/vk_raytracing_tutorial_KHR/#shaderbindingtable
-        // There is always only 1 raygen group:
-        const vk::RayTracingShaderGroupCreateInfoKHR raygenGroups{
+        const auto raygenGroup = vk::RayTracingShaderGroupCreateInfoKHR{
             .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
             .generalShader      = sRAYGEN,
             .closestHitShader   = VK_SHADER_UNUSED_KHR,
@@ -145,20 +156,24 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
             .intersectionShader = VK_SHADER_UNUSED_KHR,
         };
 
-        const auto missGroups = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
-            .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
-            .generalShader      = sMISS,
-            .closestHitShader   = VK_SHADER_UNUSED_KHR,
-            .anyHitShader       = VK_SHADER_UNUSED_KHR,
-            .intersectionShader = VK_SHADER_UNUSED_KHR,
-        }});
-        const auto hitGroups  = std::to_array({vk::RayTracingShaderGroupCreateInfoKHR{
-            .type               = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
-            .generalShader      = VK_SHADER_UNUSED_KHR,
-            .closestHitShader   = sCLOSEST_HIT,
-            .anyHitShader       = VK_SHADER_UNUSED_KHR,
-            .intersectionShader = VK_SHADER_UNUSED_KHR,
-        }});
+        const auto missGroups = std::to_array({
+            vk::RayTracingShaderGroupCreateInfoKHR{
+                .type               = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                .generalShader      = sMISS,
+                .closestHitShader   = VK_SHADER_UNUSED_KHR,
+                .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                .intersectionShader = VK_SHADER_UNUSED_KHR,
+            }
+        });
+        const auto hitGroups  = std::to_array({
+            vk::RayTracingShaderGroupCreateInfoKHR{
+                .type               = vk::RayTracingShaderGroupTypeKHR::eTrianglesHitGroup,
+                .generalShader      = VK_SHADER_UNUSED_KHR,
+                .closestHitShader   = sCLOSEST_HIT,
+                .anyHitShader       = VK_SHADER_UNUSED_KHR,
+                .intersectionShader = VK_SHADER_UNUSED_KHR,
+            }
+        });
         const std::array<vk::RayTracingShaderGroupCreateInfoKHR, 0> callableGroups;
 
         //
@@ -167,11 +182,9 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
         const uint32_t numHitGroups      = hitGroups.size();
         const uint32_t numCallableGroups = callableGroups.size();
 
-        std::array<vk::RayTracingShaderGroupCreateInfoKHR,
-                   1 + missGroups.size() + hitGroups.size() + callableGroups.size()>
-            shaderGroups;
+        std::array<vk::RayTracingShaderGroupCreateInfoKHR, 1 + numMissGroups + numHitGroups + numCallableGroups> shaderGroups;
 
-        shaderGroups[0] = raygenGroups;
+        shaderGroups[0] = raygenGroup;
 
         auto shaderGroupsItr = shaderGroups.begin() + 1;
         std::ranges::copy(missGroups, shaderGroupsItr);
@@ -217,11 +230,14 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
         alignUp(handleSizeAligned, rtPipelineProps.shaderGroupBaseAlignment); // only 1 raygen shader...
 
     //
-    // Set all of the shader ranges. Note that the first handle of each collection of handles (raygen, miss, hit, etc.)
-    // has to be aligned to shaderGroupBaseAlignment, while each handle itself has to be aligned to
+    // Set all of the shader ranges. Note that the first handle of each collection of handles (raygen, miss, hit,
+    // etc.) has to be aligned to shaderGroupBaseAlignment, while each handle itself has to be aligned to
     // shaderGroupHandleAlignment.
 
-    vk::StridedDeviceAddressRegionKHR raygenAddrRegion{.stride = raygenHandleSize, .size = raygenHandleSize};
+    vk::StridedDeviceAddressRegionKHR raygenAddrRegion{
+        .stride = raygenHandleSize,
+        .size   = raygenHandleSize
+    };
     vk::StridedDeviceAddressRegionKHR missAddrRegion{
         .stride = handleSizeAligned,
         .size   = alignUp(handleSizeAligned * numMissGroups, rtPipelineProps.shaderGroupBaseAlignment),
@@ -240,11 +256,12 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
 
     const auto sbtSize = raygenAddrRegion.size + missAddrRegion.size + hitAddrRegion.size + callableAddrRegion.size;
 
-    auto sbtBuffer = gpuAllocator.allocateBuffer(sbtSize,
-                                                 vk::BufferUsageFlagBits::eTransferDst |
-                                                     vk::BufferUsageFlagBits::eShaderDeviceAddress |
-                                                     vk::BufferUsageFlagBits::eShaderBindingTableKHR,
-                                                 VMA_MEMORY_USAGE_CPU_TO_GPU);
+    auto sbtBuffer = gpuAllocator.allocateBuffer(
+        sbtSize,
+        vk::BufferUsageFlagBits::eTransferDst             |
+            vk::BufferUsageFlagBits::eShaderDeviceAddress |
+            vk::BufferUsageFlagBits::eShaderBindingTableKHR,
+        VMA_MEMORY_USAGE_CPU_TO_GPU);
 
     // Assign the device addresses:
     const auto sbtAddress = sbtBuffer.deviceAddress(context.device());
@@ -262,8 +279,7 @@ Pipelines::RTPipeline Pipelines::createRTPipeline(const Context& context, const 
         const auto shaderHandlesSpan = std::span(shaderHandles);
 
         auto*      sbtBufferMapped = sbtBuffer.map<std::byte>();
-        const auto copySBTHandleFn = [&](size_t sbtStartAddr, size_t sbtStride, size_t handleStartIndex,
-                                         size_t handleCount) {
+        const auto copySBTHandleFn = [&](size_t sbtStartAddr, size_t sbtStride, size_t handleStartIndex, size_t handleCount) {
             for (size_t i = 0; i < handleCount; ++i) {
                 std::ranges::copy(shaderHandlesSpan.subspan(handleStartIndex + i * handleSize, handleSize),
                                   sbtBufferMapped + sbtStartAddr + (i * sbtStride));

@@ -46,14 +46,16 @@ class Pipelines
     void addBindRTPipelineCmd(const vk::CommandBuffer& commandBuffer, const RTPipelineParam& param) const;
 
   private:
-    template <size_t NumSets>
+    // Defines a descriptor when given a set of bindings. Note that we only support 1 descriptor set at this moment.
+    // Until more are needed, this just keeps things simple.
     struct Descriptor
     {
-        Descriptor(const Context& context, std::span<const vk::DescriptorSetLayoutBinding> bindings)
+        Descriptor(const Context& context, vk::ArrayProxy<const vk::DescriptorSetLayoutBinding> bindings)
         {
             setLayout = context.device().createDescriptorSetLayoutUnique(vk::DescriptorSetLayoutCreateInfo{
                 .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data()});
 
+            // Return the pool sizes, essentially combining descriptors of the same type:
             const auto poolSizes = [&]() {
                 std::vector<vk::DescriptorPoolSize> poolSizes;
 
@@ -61,9 +63,9 @@ class Pipelines
                     auto itr = std::ranges::find_if(
                         poolSizes, [&](const auto& poolSize) { return poolSize.type == binding.descriptorType; });
                     if (itr == poolSizes.end()) {
-                        poolSizes.emplace_back(binding.descriptorType, binding.descriptorCount * NumSets);
+                        poolSizes.emplace_back(binding.descriptorType, binding.descriptorCount);
                     } else {
-                        itr->descriptorCount += binding.descriptorCount * NumSets;
+                        itr->descriptorCount += binding.descriptorCount;
                     }
                 }
 
@@ -71,37 +73,32 @@ class Pipelines
             }();
 
             pool = context.device().createDescriptorPoolUnique(
-                vk::DescriptorPoolCreateInfo{.maxSets       = NumSets,
+                vk::DescriptorPoolCreateInfo{.maxSets       = 1,
                                              .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
                                              .pPoolSizes    = poolSizes.data()});
 
-            // Allocate the number of descriptor sets we need:
-            std::array<vk::DescriptorSetLayout, NumSets> setLayouts;
-            setLayouts.fill(*setLayout);
-
-            auto descriptorSetVec = context.device().allocateDescriptorSets(vk::DescriptorSetAllocateInfo{
-                .descriptorPool = *pool, .descriptorSetCount = NumSets, .pSetLayouts = setLayouts.data()});
-
-            std::ranges::copy(descriptorSetVec, sets.begin());
+            set = context.device().allocateDescriptorSets(vk::DescriptorSetAllocateInfo{
+                .descriptorPool = *pool, .descriptorSetCount = 1, .pSetLayouts = &*setLayout})[0];
         }
 
-        vk::UniqueDescriptorSetLayout          setLayout;
-        vk::UniqueDescriptorPool               pool;
-        std::array<vk::DescriptorSet, NumSets> sets;
+        vk::UniqueDescriptorSetLayout setLayout;
+        vk::UniqueDescriptorPool      pool;
+        vk::DescriptorSet             set;
     };
 
-    // All of the buffers the pipeline will use (color output buffer, ray queues, etc.):
+    // All of the buffers the pipelines will use:
     struct Buffers
     {
         UniqueBuffer beautyOutput;
     };
 
+    // All of the descriptors the pipelines will use:
     struct Descriptors
     {
-        Descriptor<1> outputBuffers;
-        Descriptor<1> sceneInfo;
-        // Descriptor<1> cameraInfo;
-        // Descriptor<1> queues; // contains all of the different queues and whatnot...
+        Descriptor outputBuffers;
+        Descriptor sceneInfo;
+        // Descriptor cameraInfo;
+        // Descriptor queues; // contains all of the different queues and whatnot...
     };
 
     //
@@ -127,7 +124,7 @@ class Pipelines
         UniqueBuffer                      sbtBuffer;
 
         // A vector of all of the descriptors that the pipeline will be using:
-        std::array<vk::DescriptorSet, 1> descriptorSets;
+        std::array<vk::DescriptorSet, 2> descriptorSets;
     };
 
   private:

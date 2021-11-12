@@ -1,0 +1,45 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_scalar_block_layout : require
+
+#include "shared.glsl"
+
+layout(location = 0) rayPayloadEXT HitPayload PAYLOAD;
+
+// Set 0 is the TLAS structure:
+layout(set = 0, binding = 0) uniform accelerationStructureEXT TLAS;
+// Set 1 is the output buffer:
+layout(set = 1, binding = 0, scalar) buffer outputBuffer
+{
+	vec3 beautyBuffer[];
+};
+
+// Always at the center for now...
+const vec3 ORIGIN       = vec3(0.0, 0.0, 0.0);
+const float SCREEN_DIST = 1.0;
+
+void main()
+{
+	const uint outputBufferIdx = gl_LaunchIDEXT.x + gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x;
+
+	// Calculate the ray direction:
+	const vec2 pixelCenter   = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+	const vec2 pixelCenterUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+	const vec2 direction     = pixelCenterUV * 2.0 - 1.0;
+
+	traceRayEXT(
+		TLAS,
+		gl_RayFlagsOpaqueEXT,
+		0xFF,
+		0,
+		0,
+		0,
+		ORIGIN,
+		0.001,
+		vec3(direction, SCREEN_DIST),
+		10000.0,
+		0); // payload location 0?
+
+	beautyBuffer[outputBufferIdx] = PAYLOAD.hitValue;
+}

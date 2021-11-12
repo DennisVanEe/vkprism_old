@@ -21,9 +21,12 @@ class ShaderFileInfo
     uint32_t    m_index;
 };
 
-static constexpr auto sRAYGEN      = ShaderFileInfo(0, "raygen.glsl.comp");
-static constexpr auto sMISS        = ShaderFileInfo(1, "raymiss.glsl.comp");
-static constexpr auto sCLOSEST_HIT = ShaderFileInfo(2, "rayclosesthit.glsl.comp");
+static constexpr auto sRAYGEN      = ShaderFileInfo(0, "raytrace.rgen");
+static constexpr auto sMISS        = ShaderFileInfo(1, "raytrace.rmiss");
+static constexpr auto sCLOSEST_HIT = ShaderFileInfo(2, "raytrace.rchit");
+
+// All shaders must have an entry function with the following name:
+static constexpr auto SHADER_ENTRY = "main";
 
 static constexpr size_t TOTAL_NUM_SHADERS = 3;
 

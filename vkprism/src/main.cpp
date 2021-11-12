@@ -26,7 +26,7 @@ int main(const int argc, const char** const argv)
         const auto scene = [&]() {
             SceneBuilder sceneBuilder;
 
-            const char* path = "D:\\dennis_stuff\\mesh_00022.ply";
+            const char* path = "D:\\Dev\\vkprism\\test_files\\sphere.ply";
 
             const auto meshIdx      = sceneBuilder.createMesh(path);
             const auto meshGroupIdx = sceneBuilder.createMeshGroup(std::to_array({PlacedMesh{.meshIdx = meshIdx}}));

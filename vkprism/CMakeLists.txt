@@ -18,9 +18,13 @@ add_executable(vkprism
     "src/shaders.cpp"
     "src/pipelines.hpp"
     "src/pipelines.cpp"
+    "src/camera.hpp"
+    "src/camera.cpp"
+    "src/sampler.hpp" 
+    #"src/shaders/shared.h"  
     # Any external libraries:
     "extern/vma/vk_mem_alloc.cpp"
-    "extern/miniply/miniply.cpp" "src/camera.hpp" "src/camera.cpp" "src/sampler.hpp"  "src/shaders/shared.h"  )
+    "extern/miniply/miniply.cpp")
 
 set_target_properties(vkprism
     PROPERTIES
@@ -58,29 +62,31 @@ configure_file("configure.hpp.in" "${PROJECT_BINARY_DIR}/include/configure.hpp")
 # Compile Shaders to SPIR-V:
 #
 
+set(build_options "--target-env=vulkan1.2")
+
 # Took this from some reddit post with some slight modifications:
 function(add_shader SHADER)
     find_program(GLSLC glslc)
 
-    set(current-shader-path ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/${SHADER})
-    set(current-output-path ${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER}.spv)
+    set(current_shader_path ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/${SHADER})
+    set(current_output_path ${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER}.spv)
 
     # Add a custom command to compile GLSL to SPIR-V.
-    get_filename_component(current-output-dir ${current-output-path} DIRECTORY)
-    file(MAKE_DIRECTORY ${current-output-dir})
+    get_filename_component(current_output_dir ${current_output_path} DIRECTORY)
+    file(MAKE_DIRECTORY ${current_output_dir})
 
     add_custom_command(
-           OUTPUT ${current-output-path}
-           COMMAND ${GLSLC} -o ${current-output-path} ${current-shader-path}
-           DEPENDS ${current-shader-path}
-           IMPLICIT_DEPENDS CXX ${current-shader-path}
+           OUTPUT ${current_output_path}
+           COMMAND ${GLSLC} ${build_options} -c ${current_shader_path} -o ${current_output_path}
+           DEPENDS ${current_shader_path}
+           IMPLICIT_DEPENDS CXX ${current_shader_path}
            VERBATIM)
 
     # Make sure our build depends on this output.
-    set_source_files_properties(${current-output-path} PROPERTIES GENERATED TRUE)
-    target_sources(vkprism PRIVATE ${current-output-path})
+    set_source_files_properties(${current_output_path} PROPERTIES GENERATED TRUE)
+    target_sources(vkprism PRIVATE ${current_output_path})
 endfunction(add_shader)
 
-add_shader("raygen.glsl.comp")
-add_shader("raymiss.glsl.comp")
-add_shader("rayclosesthit.glsl.comp")
+add_shader("raytrace.rgen")
+add_shader("raytrace.rmiss")
+add_shader("raytrace.rchit")
