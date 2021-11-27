@@ -3,9 +3,11 @@
 
 struct Ray
 {
-	vec4  org;
-	vec4  dir;
+	vec3  org;
+	vec3  dir;
 	float time;
+	float tNear;
+	float tFar;
 };
 
 #endif // _COMMON_GLSL_

@@ -19,6 +19,8 @@ namespace prism {
 // SceneBuilder
 //
 
+void SceneBuilder::addCamera(std::unique_ptr<Camera> camera) { m_camera = std::move(camera); }
+
 MeshIndex SceneBuilder::createMesh(const std::string_view filePath)
 {
     const std::string  cstrFilepath(filePath);
@@ -147,17 +149,18 @@ InstanceIndex SceneBuilder::createInstance(const Instance& instance)
 Scene::Scene(const SceneParam& param, const Context& context, const GPUAllocator& allocator,
              const SceneBuilder& sceneBuilder)
 {
-    const auto commandPool = context.device().createCommandPoolUnique(
-        vk::CommandPoolCreateInfo{
-            .flags            = vk::CommandPoolCreateFlagBits::eTransient, // All of the command buffers will be short lived
-            .queueFamilyIndex = context.queueFamilyIndex()
-        });
+    const auto commandPool = context.device().createCommandPoolUnique(vk::CommandPoolCreateInfo{
+        .flags            = vk::CommandPoolCreateFlagBits::eTransient, // All of the command buffers will be short lived
+        .queueFamilyIndex = context.queueFamilyIndex()});
 
     m_meshGpuData = transferMeshData(context, allocator, *commandPool, sceneBuilder.m_meshes, sceneBuilder.m_vertices,
                                      sceneBuilder.m_faces, sceneBuilder.m_transforms);
     m_blases      = createBlas(context, allocator, *commandPool, m_meshGpuData, sceneBuilder.m_meshes,
                           sceneBuilder.m_meshGroups, param.enableCompaction);
     m_tlas        = createTlas(context, allocator, *commandPool, sceneBuilder.m_instances, m_blases);
+
+    m_cameraData    = transferCamera(context, *commandPool, allocator, sceneBuilder.m_camera.get());
+    m_cameraSPVPath = sceneBuilder.m_camera->getCameraSPVPath();
 }
 
 Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GPUAllocator& gpuAllocator,
@@ -215,13 +218,12 @@ Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GPUAllo
     };
 }
 
-std::vector<Scene::AccelStructInfo> Scene::createBlas(
-    const Context& context, const GPUAllocator&    allocator,
-    const vk::CommandPool&                         commandPool,
-    const MeshGpuData&                             meshGpuData,
-    const std::span<const SceneBuilder::Mesh>      meshes,
-    const std::span<const std::vector<PlacedMesh>> meshGroups,
-    const bool                                     enableCompaction)
+std::vector<Scene::AccelStructInfo> Scene::createBlas(const Context& context, const GPUAllocator& allocator,
+                                                      const vk::CommandPool&                         commandPool,
+                                                      const MeshGpuData&                             meshGpuData,
+                                                      const std::span<const SceneBuilder::Mesh>      meshes,
+                                                      const std::span<const std::vector<PlacedMesh>> meshGroups,
+                                                      const bool                                     enableCompaction)
 {
     const auto gpuVerticesAddr = meshGpuData.vertices.deviceAddress(context.device());
     const auto gpuFacesAddr    = meshGpuData.faces.deviceAddress(context.device());
@@ -506,6 +508,31 @@ Scene::AccelStructInfo Scene::createTlas(const Context& context, const GPUAlloca
     submitAndWait(context, *commandBuffer, "TLAS construction");
 
     return AccelStructInfo{.buffer = std::move(tlasBuffer), .accelStruct = std::move(tlasAccelStruct)};
+}
+
+UniqueBuffer Scene::transferCamera(const Context& context, const vk::CommandPool& commandPool,
+                                   const GPUAllocator& gpuAllocator, const Camera* camera)
+{
+    const auto commandBuffer = std::move(context.device().allocateCommandBuffersUnique(vk::CommandBufferAllocateInfo{
+        .commandPool        = commandPool,
+        .level              = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = 1,
+    })[0]);
+
+    commandBuffer->begin(vk::CommandBufferBeginInfo{.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
+
+    const auto cameraShaderData = camera->getCameraShaderData();
+
+    auto gpuShaderData = gpuAllocator.allocateBuffer(
+        cameraShaderData.size(), vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eUniformBuffer,
+        VMA_MEMORY_USAGE_GPU_ONLY);
+
+    const auto stagingShaderData =
+        addCopyToBufferCommand(*commandBuffer, gpuAllocator, gpuShaderData, cameraShaderData);
+
+    submitAndWait(context, *commandBuffer, "Transfering camera data");
+
+    return gpuShaderData;
 }
 
 } // namespace prism

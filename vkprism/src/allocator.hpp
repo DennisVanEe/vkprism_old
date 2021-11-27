@@ -102,7 +102,7 @@ class GPUAllocator
 };
 
 // Adds the copy to buffer command, returning the temporary buffer used so that we can properly deallocate it when
-// necessary.
+// necessary. Note that T has to be a standard C++ iterable container.
 template <typename T>
 [[nodiscard]] UniqueBuffer addCopyToBufferCommand(const vk::CommandBuffer& commandBuffer,
                                                   const GPUAllocator& gpuAllocator, const UniqueBuffer& dstBuffers,

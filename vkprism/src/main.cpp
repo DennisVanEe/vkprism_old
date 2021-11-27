@@ -36,7 +36,7 @@ int main(const int argc, const char** const argv)
                 .mask         = 1,
                 .hitGroupId   = 1,
                 .meshGroupIdx = meshGroupIdx,
-                .transform    = Transform(glm::mat4(1.0)),
+                .transform    = Transform(glm::translate(glm::vec3(0, 1.0, 0.0))),
             });
 
             return Scene({}, ctx, allocator, sceneBuilder);

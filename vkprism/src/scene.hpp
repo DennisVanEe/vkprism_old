@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <allocator.hpp>
+#include <camera.hpp>
 #include <context.hpp>
 #include <transform.hpp>
 
@@ -60,6 +61,8 @@ class SceneBuilder
   public:
     SceneBuilder() = default;
 
+    void addCamera(std::unique_ptr<Camera> camera);
+
     MeshIndex      createMesh(std::string_view path);
     TransformIndex createTransform(const Transform& transform);
     MeshGroupIndex createMeshGroup(std::span<const PlacedMesh> placedMeshes);
@@ -90,6 +93,8 @@ class SceneBuilder
     // Collection of mesh groups:
     std::vector<std::vector<PlacedMesh>> m_meshGroups;
     std::vector<Instance>                m_instances;
+
+    std::unique_ptr<Camera> m_camera;
 };
 
 struct SceneParam
@@ -107,6 +112,10 @@ class Scene
 
     const vk::Buffer&                   gpuVertices() const { return *m_meshGpuData.vertices; }
     const vk::AccelerationStructureKHR& tlas() const { return *m_tlas.accelStruct; }
+
+    const vk::Buffer& gpuCameraData() const { return *m_cameraData; }
+    // The SPV path is the path to the camera's raygen module:
+    std::string_view  cameraSPVPath() const { return m_cameraSPVPath; }
 
   private:
     struct MeshGpuData
@@ -135,12 +144,17 @@ class Scene
     static AccelStructInfo              createTlas(const Context& context, const GPUAllocator& allocator,
                                                    const vk::CommandPool& commandPool, std::span<const Instance> instances,
                                                    std::span<const AccelStructInfo> blases);
+    static UniqueBuffer                 transferCamera(const Context& context, const vk::CommandPool& commandPool,
+                                                       const GPUAllocator& allocator, const Camera* camera);
 
   private:
     MeshGpuData m_meshGpuData;
 
     std::vector<AccelStructInfo> m_blases; // All of the instances of an object
     AccelStructInfo              m_tlas;
+
+    UniqueBuffer m_cameraData;
+    std::string  m_cameraSPVPath;
 };
 
 } // namespace prism

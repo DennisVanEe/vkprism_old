@@ -1,0 +1,14 @@
+BasedOnStyle: Microsoft
+IndentWidth: 4
+AlignConsecutiveAssignments: true
+AlignConsecutiveBitFields: true
+AlignConsecutiveDeclarations: true
+BreakBeforeBraces: Mozilla
+AlwaysBreakTemplateDeclarations: Yes
+BreakConstructorInitializers: AfterColon
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+AllowShortFunctionsOnASingleLine: true
+
+# Force pointer aligment left (should also be for references)
+DerivePointerAlignment: false
+PointerAlignment: Left

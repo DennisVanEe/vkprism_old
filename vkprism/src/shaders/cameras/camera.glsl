@@ -1,7 +1,9 @@
-// All of the types required by cameras:
-#ifdef CAMERA_TYPES
 
-#include "../common.glsl"
+//
+// All of the types required by cameras:
+//
+
+#ifdef CAMERA_TYPES
 
 struct CameraSample
 {
@@ -13,25 +15,30 @@ struct CameraSample
 #undef CAMERA_TYPES
 #endif
 
-// The main function that actually traces the rays:
+//
+// The function that executes the camera:
+//
+
 #ifdef CAMERA_MAIN
 
+#include "../common.glsl"
 #include "../sampler.glsl"
 
 layout(set = 1, 
 
-layout(set = 2, binding = 1) OutputBuffers
+layout(set = 2, binding = 1, scalar) OutputBuffers
 {
-    float beauty[]; // The beauty output aov...
+    vec3 beauty[]; // The beauty output aov...
 }
 g_outputBuffers;
 
 void main()
 {
     // For now, we'll just allocate the sampler:
-    Sampler sampler = sampler_create();
+    Sampler localSampler = sampler_create();
 
-    Ray cameraRay = camera_genRay(cameraSample);
+    // Generate the camera ray:
+    const Ray cameraRay = camera_generateRay(cameraSample);
 }
 
 #undef CAMERA_MAIN
