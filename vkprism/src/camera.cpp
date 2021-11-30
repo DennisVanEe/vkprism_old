@@ -64,6 +64,6 @@ std::vector<std::byte> PerspectiveCamera::getCameraShaderData() const
     return shaderDataBytes;
 }
 
-std::string_view PerspectiveCamera::getCameraSPVPath() const {}
+std::string_view PerspectiveCamera::getShaderName() const { return "perspective.rgen"; }
 
 } // namespace prism

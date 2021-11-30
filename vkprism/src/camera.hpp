@@ -22,7 +22,7 @@ class Camera
     // Returns the uniform data to be sent to the GPU:
     virtual std::vector<std::byte> getCameraShaderData() const = 0;
     // Returns the shader SPIR-V file for the camera:
-    virtual std::string getCameraSPVPath() const = 0;
+    virtual std::string_view getShaderName() const = 0;
 
   protected:
 };
@@ -42,7 +42,7 @@ class PerspectiveCamera : public Camera
     PerspectiveCamera(const PerspectiveCameraParam& param, const Film& film);
 
     std::vector<std::byte> getCameraShaderData() const override;
-    std::string_view       getCameraSPVPath() const override;
+    std::string_view       getShaderName() const override;
 
   private:
     float m_lensRadius;

@@ -29,6 +29,8 @@ add_executable(vkprism
     "src/bbox.cpp"
     "src/descriptor.hpp"
     "src/descriptor.cpp"
+    "src/pipelines/raytracing.hpp"
+    "src/pipelines/raytracing.cpp"
     #"src/shaders/shared.h"  
     # Any external libraries:
     "extern/vma/vk_mem_alloc.cpp"

@@ -127,9 +127,6 @@ class Pipelines
         vk::StridedDeviceAddressRegionKHR hitAddrRegion;
         vk::StridedDeviceAddressRegionKHR callableAddrRegion;
         UniqueBuffer                      sbtBuffer;
-
-        // A vector of all of the descriptors that the pipeline will be using:
-        std::array<vk::DescriptorSet, 2> descriptorSets;
     };
 
   private:

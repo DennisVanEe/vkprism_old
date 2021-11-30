@@ -115,7 +115,7 @@ class Scene
 
     const vk::Buffer& gpuCameraData() const { return *m_cameraData; }
     // The SPV path is the path to the camera's raygen module:
-    std::string_view  cameraSPVPath() const { return m_cameraSPVPath; }
+    std::string_view cameraShaderName() const { return m_cameraShaderName; }
 
   private:
     struct MeshGpuData
@@ -153,8 +153,8 @@ class Scene
     std::vector<AccelStructInfo> m_blases; // All of the instances of an object
     AccelStructInfo              m_tlas;
 
-    UniqueBuffer m_cameraData;
-    std::string  m_cameraSPVPath;
+    UniqueBuffer     m_cameraData;
+    std::string_view m_cameraShaderName;
 };
 
 } // namespace prism

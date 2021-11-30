@@ -159,8 +159,8 @@ Scene::Scene(const SceneParam& param, const Context& context, const GPUAllocator
                           sceneBuilder.m_meshGroups, param.enableCompaction);
     m_tlas        = createTlas(context, allocator, *commandPool, sceneBuilder.m_instances, m_blases);
 
-    m_cameraData    = transferCamera(context, *commandPool, allocator, sceneBuilder.m_camera.get());
-    m_cameraSPVPath = sceneBuilder.m_camera->getCameraSPVPath();
+    m_cameraData       = transferCamera(context, *commandPool, allocator, sceneBuilder.m_camera.get());
+    m_cameraShaderName = sceneBuilder.m_camera->getShaderName();
 }
 
 Scene::MeshGpuData Scene::transferMeshData(const Context& context, const GPUAllocator& gpuAllocator,
